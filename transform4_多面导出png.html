@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D 教室重建 (带微调功能)</title>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; display: flex; flex-direction: column; align-items: center; padding: 20px; color: #333; }
+        h2 { margin-bottom: 20px; }
+        .controls { margin-bottom: 25px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        button, .btn-label { padding: 8px 16px; font-size: 14px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-primary:hover { background: #0069d9; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-warning { background: #ffc107; color: #212529; }
+        .btn-purple { background: #6f42c1; color: white; }
+        input[type="file"] { display: none; }
+        
+        .workspace { display: flex; flex-direction: column; gap: 30px; align-items: center; width: 100%; max-width: 1200px; }
+        
+        /* 2D 编辑器 */
+        .editor-container { position: relative; line-height: 0; user-select: none; margin-bottom: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); border-radius: 8px; overflow: visible;}
+        canvas { max-width: 100%; height: auto; display: block; }
+        .handle { width: 16px; height: 16px; background: rgba(255, 69, 0, 0.9); border: 2px solid white; border-radius: 50%; position: absolute; transform: translate(-50%, -50%); cursor: grab; z-index: 20; }
+        .handle.front { background: rgba(0, 150, 255, 0.9); }
+
+        /* 3D 预览与调整区 */
+        .preview-section { width: 100%; display: none; flex-direction: column; gap: 15px; }
+        
+        /* 3D 容器 */
+        #threeContainer { width: 100%; height: 500px; background: #333; border-radius: 8px; position: relative; overflow: hidden;}
+        #threeContainer::after { content: '左键旋转 | 右键平移 | 滚轮缩放'; position: absolute; bottom: 10px; left: 10px; color: rgba(255,255,255,0.5); font-size: 12px; pointer-events: none;}
+
+        /* 微调面板 */
+        .adjust-panel { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
+        .adjust-group { display: flex; flex-direction: column; gap: 5px; padding: 5px; border: 1px solid #eee; border-radius: 4px; }
+        .adjust-group h4 { margin: 0 0 5px 0; font-size: 14px; color: #555; border-bottom: 2px solid #eee; padding-bottom: 3px; }
+        .control-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+        .slider-row { display: flex; flex-direction: column; gap: 5px; font-size: 13px; grid-column: 1 / -1; background: #f8f9fa; padding: 10px; border-radius: 4px; }
+        
+        /* 隐藏中间结果画布 */
+        #hiddenCanvases { display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>3D 教室重建 (带微调功能)</h2>
+
+    <div class="controls">
+        <label for="upload" class="btn-label btn-primary">📁 1. 导入图片</label>
+        <input type="file" id="upload" accept="image/*">
+        <button onclick="perform2D()" class="btn-primary">🔄 2. 生成贴图</button>
+        <button onclick="preview3D()" id="btnGen3D" class="btn-warning" style="display:none;">✨ 3. 3D 预览与调整</button>
+        <button onclick="exportGLB()" id="btnExportGLB" class="btn-purple" style="display:none;">📦 4. 导出 GLB</button>
+    </div>
+
+    <div class="workspace">
+        <div class="editor-container" id="editorStage">
+            <canvas id="srcCanvas"></canvas>
+            <div class="handle back" id="p0"></div> <div class="handle back" id="p1"></div> <div class="handle back" id="p2"></div> <div class="handle back" id="p3"></div>
+            <div class="handle front" id="p4"></div> <div class="handle front" id="p5"></div> <div class="handle front" id="p6"></div> <div class="handle front" id="p7"></div>
+        </div>
+
+        <div class="preview-section" id="previewSection">
+            <div class="adjust-panel">
+                <div class="slider-row">
+                    <label>📏 教室进深比例 (Depth Scale): <span id="depthVal">1.0</span></label>
+                    <input type="range" id="depthSlider" min="0.5" max="4.0" step="0.1" value="1.0" oninput="update3DParams()">
+                </div>
+                
+                <div class="adjust-group">
+                    <h4>后面 (Back Wall)</h4>
+                    <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkBackX" onchange="update3DParams()" checked></div>
+                    <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkBackY" onchange="update3DParams()"></div>
+                </div>
+                <div class="adjust-group">
+                    <h4>左面 (Left Wall)</h4>
+                    <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkLeftX" onchange="update3DParams()"></div>
+                    <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkLeftY" onchange="update3DParams()"></div>
+                </div>
+                <div class="adjust-group">
+                    <h4>右面 (Right Wall)</h4>
+                    <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkRightX" onchange="update3DParams()" checked></div>
+                    <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkRightY" onchange="update3DParams()"></div>
+                </div>
+                <div class="adjust-group">
+                    <h4>地面 (Floor)</h4>
+                    <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkBottomX" onchange="update3DParams()" checked></div>
+                    <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkBottomY" onchange="update3DParams()"></div>
+                </div>
+            </div>
+            
+            <div id="threeContainer"></div>
+        </div>
+
+        <div id="hiddenCanvases">
+            <canvas id="resBack"></canvas><canvas id="resLeft"></canvas>
+            <canvas id="resRight"></canvas><canvas id="resBottom"></canvas>
+        </div>
+    </div>
+
+<script>
+    // --- 2D 部分 ---
+    const srcCanvas = document.getElementById('srcCanvas');
+    const ctxSrc = srcCanvas.getContext('2d', {willReadFrequently:true});
+    const handles = Array.from({length:8}, (_,i)=>document.getElementById(`p${i}`));
+    const resCanvases = { back:document.getElementById('resBack'), left:document.getElementById('resLeft'), right:document.getElementById('resRight'), bottom:document.getElementById('resBottom') };
+    
+    let img = new Image();
+    let points = Array(8).fill().map(_=>({x:0,y:0}));
+    let activeIdx = -1;
+    let imgData = null;
+    const faces = { back:[0,1,3,2], left:[4,0,2,6], right:[1,5,7,3], bottom:[2,3,7,6] };
+
+    document.getElementById('upload').onchange = e => {
+        const f = e.target.files[0]; if(!f)return;
+        const r = new FileReader(); r.onload=ev=>{img.src=ev.target.result;}; 
+        img.onload = initEditor; r.readAsDataURL(f);
+    };
+
+    function initEditor() {
+        srcCanvas.width = img.width; srcCanvas.height = img.height;
+        ctxSrc.drawImage(img,0,0); imgData = ctxSrc.getImageData(0,0,img.width,img.height);
+        
+        // 默认点位
+        if(points[0].x===0){
+            const w=img.width, h=img.height, cx=w/2, cy=h/2;
+            points[0]={x:cx-w*0.2,y:cy-h*0.2}; points[1]={x:cx+w*0.2,y:cy-h*0.2};
+            points[2]={x:cx-w*0.2,y:cy+h*0.2}; points[3]={x:cx+w*0.2,y:cy+h*0.2};
+            points[4]={x:cx-w*0.4,y:cy-h*0.4}; points[5]={x:cx+w*0.4,y:cy-h*0.4};
+            points[6]={x:cx-w*0.4,y:cy+h*0.4}; points[7]={x:cx+w*0.4,y:cy+h*0.4};
+        }
+        drawEditor();
+        document.getElementById('btnGen3D').style.display='none';
+    }
+
+    function drawEditor() {
+        ctxSrc.clearRect(0,0,srcCanvas.width,srcCanvas.height); ctxSrc.drawImage(img,0,0);
+        ctxSrc.strokeStyle='cyan'; ctxSrc.lineWidth=2; ctxSrc.beginPath();
+        // 线框
+        const link = (a,b)=>{ctxSrc.moveTo(points[a].x,points[a].y);ctxSrc.lineTo(points[b].x,points[b].y)};
+        [0,1,3,2].reduce((a,b)=>{link(a,b);return b},2); // Back rect
+        link(0,4); link(1,5); link(2,6); link(3,7); // Arms
+        link(4,6); link(5,7); link(6,7); // Front opening
+        ctxSrc.stroke();
+        points.forEach((p,i)=>{handles[i].style.left=p.x/img.width*100+'%';handles[i].style.top=p.y/img.height*100+'%'});
+    }
+
+    handles.forEach((h,i)=>{ h.onmousedown=e=>{e.preventDefault();e.stopPropagation();activeIdx=i}; h.ontouchstart=e=>{e.preventDefault();activeIdx=i} });
+    const move = e=>{
+        if(activeIdx<0)return; e.preventDefault();
+        const rect = srcCanvas.getBoundingClientRect();
+        const cx = e.touches?e.touches[0].clientX:e.clientX; const cy = e.touches?e.touches[0].clientY:e.clientY;
+        points[activeIdx].x = (cx-rect.left)*(srcCanvas.width/rect.width);
+        points[activeIdx].y = (cy-rect.top)*(srcCanvas.height/rect.height);
+        drawEditor();
+    };
+    window.onmousemove=move; window.ontouchmove=move; window.onmouseup=()=>activeIdx=-1; window.ontouchend=()=>activeIdx=-1;
+
+    window.perform2D = () => {
+        if(!imgData)return alert('请先导入');
+        const avg = getAvgColor(imgData);
+        for(let k in faces) warp(faces[k], resCanvases[k], avg);
+        document.getElementById('btnGen3D').style.display='inline-flex';
+        alert("贴图已生成，请点击【3. 3D 预览与调整】");
+    };
+
+    function warp(idx, cvs, fill) {
+        const ps = idx.map(i=>points[i]);
+        const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y);
+        const w = Math.max(dist(ps[0],ps[1]), dist(ps[2],ps[3]))|0;
+        const h = Math.max(dist(ps[0],ps[3]), dist(ps[1],ps[2]))|0;
+        cvs.width=w; cvs.height=h;
+        const ctx = cvs.getContext('2d'); const dDst = ctx.createImageData(w,h);
+        const H = calcH(w,h,ps);
+        if(!H) return;
+        
+        for(let y=0;y<h;y++){
+            for(let x=0;x<w;x++){
+                const z = H[6]*x + H[7]*y + H[8]; 
+                const u = (H[0]*x + H[1]*y + H[2])/z; const v = (H[3]*x + H[4]*y + H[5])/z;
+                const srcIdx = ((v|0)*srcCanvas.width + (u|0))*4; const dstIdx = (y*w+x)*4;
+                if(u>=0 && u<srcCanvas.width && v>=0 && v<srcCanvas.height){
+                    dDst.data.set(imgData.data.subarray(srcIdx,srcIdx+4), dstIdx);
+                } else {
+                    dDst.data.set([fill.r,fill.g,fill.b,255], dstIdx);
+                }
+            }
+        }
+        ctx.putImageData(dDst,0,0);
+    }
+
+    function calcH(w,h,p){
+        let sx=[p[0].x,p[1].x,p[2].x,p[3].x], sy=[p[0].y,p[1].y,p[2].y,p[3].y];
+        let dx=[0,w,w,0], dy=[0,0,h,h];
+        let A=[], B=[];
+        for(let i=0;i<4;i++){
+            A.push([dx[i],dy[i],1,0,0,0,-sx[i]*dx[i],-sx[i]*dy[i]]);
+            A.push([0,0,0,dx[i],dy[i],1,-sy[i]*dx[i],-sy[i]*dy[i]]);
+            B.push(sx[i]); B.push(sy[i]);
+        }
+        // Gaussian elimination (simplified)
+        const solve = (A, b) => {
+            let n=8; 
+            for(let i=0;i<n;i++){
+                let max=i; for(let k=i+1;k<n;k++) if(Math.abs(A[k][i])>Math.abs(A[max][i])) max=k;
+                [A[i],A[max]]=[A[max],A[i]]; [b[i],b[max]]=[b[max],b[i]];
+                for(let j=i+1;j<n;j++){
+                    let f=A[j][i]/A[i][i]; b[j]-=f*b[i];
+                    for(let k=i;k<n;k++) A[j][k]-=f*A[i][k];
+                }
+            }
+            let x=new Array(n);
+            for(let i=n-1;i>=0;i--){
+                let sum=0; for(let j=i+1;j<n;j++) sum+=A[i][j]*x[j];
+                x[i]=(b[i]-sum)/A[i][i];
+            }
+            return x;
+        };
+        try { return [...solve(A,B), 1]; } catch(e){ return null; }
+    }
+    function getAvgColor(d){ let r=0,g=0,b=0,c=0; for(let i=0;i<d.data.length;i+=40)if(d.data[i+3]>0){r+=d.data[i];g+=d.data[i+1];b+=d.data[i+2];c++} return {r:r/c|0,g:g/c|0,b:b/c|0}; }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+    let scene, camera, renderer, controls, roomGroup;
+    let materials = {};
+    const container = document.getElementById('threeContainer');
+
+    window.preview3D = function() {
+        document.getElementById('previewSection').style.display='flex';
+        document.getElementById('btnExportGLB').style.display='inline-flex';
+        if(!renderer) init3D();
+        updateRoom();
+    }
+
+    // 更新参数
+    window.update3DParams = function() {
+        document.getElementById('depthVal').innerText = document.getElementById('depthSlider').value;
+        updateRoom();
+    }
+
+    function init3D() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222); // 暗色背景以便观察
+        
+        const aspect = container.clientWidth/container.clientHeight;
+        camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 2000);
+        camera.position.set(0, 50, 400);
+
+        renderer = new THREE.WebGLRenderer({antialias:true});
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+        scene.add(ambientLight);
+
+        // 初始化材质
+        const keys = ['back','left','right','bottom'];
+        keys.forEach(k => {
+            const tex = new THREE.CanvasTexture(document.getElementById('res'+k.charAt(0).toUpperCase()+k.slice(1)));
+            tex.colorSpace = THREE.SRGBColorSpace;
+            materials[k] = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+        });
+
+        animate();
+    }
+
+    function updateRoom() {
+        if(roomGroup) scene.remove(roomGroup);
+        roomGroup = new THREE.Group();
+
+        // 1. 获取基础尺寸
+        const backW = document.getElementById('resBack').width;
+        const backH = document.getElementById('resBack').height;
+        // 2. 获取深度拉伸倍率
+        const depthScale = parseFloat(document.getElementById('depthSlider').value);
+        // 基础深度取左右墙宽度的平均值
+        const baseDepth = (document.getElementById('resLeft').width + document.getElementById('resRight').width) / 2;
+        
+        const w = backW;
+        const h = backH;
+        const d = baseDepth * depthScale; // 应用拉伸
+
+        // 辅助函数：应用纹理变换 (翻转)
+        const applyTransform = (key, chkXId, chkYId) => {
+            const mat = materials[key];
+            const tex = mat.map;
+            const flipX = document.getElementById(chkXId).checked;
+            const flipY = document.getElementById(chkYId).checked;
+
+            // 重置
+            tex.center.set(0.5, 0.5);
+            tex.repeat.set(flipX ? -1 : 1, flipY ? -1 : 1);
+            // 某些情况下需要旋转修正，这里默认不做额外旋转，全靠 scale/repeat 控制
+            // 对于 Left/Right/Bottom，我们需要手动对齐 UV
+        };
+
+        // --- 组装 Mesh ---
+        
+        // 1. 后墙 (Back Wall)
+        applyTransform('back', 'chkBackX', 'chkBackY');
+        const planeBack = new THREE.Mesh(new THREE.PlaneGeometry(w, h), materials.back);
+        planeBack.position.set(0, 0, -d/2); 
+        // 默认让它面向内部
+        // planeBack.rotation.y = 0; 
+        roomGroup.add(planeBack);
+
+        // 2. 左墙 (Left Wall)
+        applyTransform('left', 'chkLeftX', 'chkLeftY');
+        const planeLeft = new THREE.Mesh(new THREE.PlaneGeometry(d, h), materials.left);
+        planeLeft.position.set(-w/2, 0, 0);
+        planeLeft.rotation.y = Math.PI / 2;
+        roomGroup.add(planeLeft);
+
+        // 3. 右墙 (Right Wall)
+        applyTransform('right', 'chkRightX', 'chkRightY');
+        const planeRight = new THREE.Mesh(new THREE.PlaneGeometry(d, h), materials.right);
+        planeRight.position.set(w/2, 0, 0);
+        planeRight.rotation.y = -Math.PI / 2;
+        roomGroup.add(planeRight);
+
+        // 4. 地面 (Floor)
+        applyTransform('bottom', 'chkBottomX', 'chkBottomY');
+        const planeBottom = new THREE.Mesh(new THREE.PlaneGeometry(w, d), materials.bottom);
+        planeBottom.position.set(0, -h/2, 0);
+        planeBottom.rotation.x = -Math.PI / 2;
+        roomGroup.add(planeBottom);
+
+        scene.add(roomGroup);
+        
+        // 自动调整相机位置看中心
+        // controls.target.set(0,0,0);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+    }
+
+    window.exportGLB = function() {
+        const exporter = new GLTFExporter();
+        exporter.parse(roomGroup, (gltf) => {
+            const blob = new Blob([gltf], {type:'application/octet-stream'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'classroom_fixed.glb';
+            link.click();
+        }, (err)=>console.error(err), {binary:true});
+    }
+</script>
+</body>
+</html>

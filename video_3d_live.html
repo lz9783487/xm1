@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频3D实时播放 (修复版)</title>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.159.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/" } }
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #111;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: #222;
+            padding: 10px 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+        }
+
+        button,
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .btn-blue {
+            background: #0d6efd;
+            color: #fff;
+        }
+
+        .btn-green {
+            background: #198754;
+            color: #fff;
+        }
+
+        .btn-yellow {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .btn-red {
+            background: #dc3545;
+            color: #fff;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .tabs {
+            display: flex;
+            justify-content: center;
+            background: #1a1a1a;
+        }
+
+        .tab {
+            padding: 12px 40px;
+            cursor: pointer;
+            color: #666;
+            font-weight: 600;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab.active {
+            color: #0d6efd;
+            border-bottom-color: #0d6efd;
+        }
+
+        .main {
+            display: flex;
+            gap: 15px;
+            padding: 15px;
+            flex-wrap: wrap;
+        }
+
+        .view-area {
+            flex: 1;
+            min-width: 500px;
+        }
+
+        .canvas-box {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            min-height: 400px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #view2D,
+        #view3D {
+            width: 100%;
+            border-radius: 8px;
+        }
+
+        #view3D {
+            height: 450px;
+            display: none;
+        }
+
+        video {
+            display: none;
+        }
+
+        .handle {
+            width: 16px;
+            height: 16px;
+            background: #ff4500;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            position: absolute;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            z-index: 10;
+        }
+
+        .handle.blue {
+            background: #00aaff;
+        }
+
+        .playbar {
+            background: #222;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+
+        .progress {
+            height: 8px;
+            background: #444;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0d6efd, #00d4ff);
+            width: 0%;
+            border-radius: 4px;
+        }
+
+        .play-btns {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .time {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .panel {
+            width: 280px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .section {
+            background: #222;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+
+        .section h4 {
+            color: #0d6efd;
+            font-size: 13px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 6px;
+        }
+
+        .ctrl {
+            margin-bottom: 8px;
+        }
+
+        .ctrl label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 3px;
+        }
+
+        .ctrl input[type="range"] {
+            width: 100%;
+        }
+
+        .section-3d {
+            display: none;
+        }
+
+        .grid-3d {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .box-3d {
+            background: #333;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .box-3d h5 {
+            margin-bottom: 5px;
+            color: #ccc;
+        }
+
+        .row-3d {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+        }
+
+        .rec-badge {
+            display: none;
+            background: #dc3545;
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            animation: blink 1s infinite;
+        }
+
+        .rec-badge.show {
+            display: inline-block;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0.5;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <label class="btn btn-blue"><input type="file" id="fileVideo" accept="video/*">📹 导入视频</label>
+        <label class="btn btn-blue"><input type="file" id="fileImage" accept="image/*">🖼️ 导入图片</label>
+        <button class="btn btn-green" id="btnSave" style="display:none">💾 保存</button>
+        <button class="btn btn-red" id="btnRec" style="display:none">⏺️ 录制</button>
+        <button class="btn btn-yellow" id="btnGLB" style="display:none">📦 GLB</button>
+        <span class="rec-badge" id="recBadge">🔴 录制中</span>
+    </div>
+
+    <div class="tabs" id="tabs" style="display:none">
+        <div class="tab active" data-v="2d">📐 2D编辑</div>
+        <div class="tab" data-v="3d">🎮 3D预览</div>
+    </div>
+
+    <div class="main" id="mainArea" style="display:none">
+        <div class="view-area">
+            <div class="canvas-box" id="canvasBox">
+                <video id="vid" playsinline muted></video>
+                <canvas id="view2D"></canvas>
+                <div id="view3D"></div>
+                <div class="handle" id="h0"></div>
+                <div class="handle" id="h1"></div>
+                <div class="handle" id="h2"></div>
+                <div class="handle" id="h3"></div>
+                <div class="handle blue" id="h4"></div>
+                <div class="handle blue" id="h5"></div>
+                <div class="handle blue" id="h6"></div>
+                <div class="handle blue" id="h7"></div>
+            </div>
+            <div class="playbar" id="playbar" style="display:none">
+                <div class="progress" id="prog">
+                    <div class="progress-fill" id="progFill"></div>
+                </div>
+                <div class="play-btns">
+                    <button class="btn btn-blue" id="btnPrev">⏮️</button>
+                    <button class="btn btn-green" id="btnPlay">▶️</button>
+                    <button class="btn btn-blue" id="btnNext">⏭️</button>
+                    <span class="time" id="timeDisp">00:00 / 00:00</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="section">
+                <h4>垂直弧度</h4>
+                <div class="ctrl"><label>上 <span id="vTop">0.00</span></label><input type="range" id="rTop" min="-2"
+                        max="2" step="0.01" value="0"></div>
+                <div class="ctrl"><label>下 <span id="vBot">0.00</span></label><input type="range" id="rBot" min="-2"
+                        max="2" step="0.01" value="0"></div>
+            </div>
+            <div class="section">
+                <h4>水平弧度</h4>
+                <div class="ctrl"><label>左 <span id="vLeft">0.00</span></label><input type="range" id="rLeft" min="-2"
+                        max="2" step="0.01" value="0"></div>
+                <div class="ctrl"><label>右 <span id="vRight">0.00</span></label><input type="range" id="rRight" min="-2"
+                        max="2" step="0.01" value="0"></div>
+            </div>
+            <div class="section">
+                <h4>缩放</h4>
+                <div class="ctrl"><label>比例 <span id="vScale">1.00</span></label><input type="range" id="rScale"
+                        min="0.5" max="5" step="0.01" value="1"></div>
+            </div>
+            <div class="section section-3d" id="sec3D">
+                <h4>3D参数</h4>
+                <div class="ctrl"><label>高度 <span id="v3H">1.0</span></label><input type="range" id="r3H" min="0.5"
+                        max="3" step="0.1" value="1"></div>
+                <div class="ctrl"><label>深度 <span id="v3D">1.0</span></label><input type="range" id="r3D" min="0.5"
+                        max="4" step="0.1" value="1"></div>
+                <div class="grid-3d">
+                    <div class="box-3d">
+                        <h5>后墙</h5>
+                        <div class="row-3d"><span>镜像</span><input type="checkbox" id="cBX" checked></div>
+                        <div class="row-3d"><span>翻转</span><input type="checkbox" id="cBY"></div>
+                    </div>
+                    <div class="box-3d">
+                        <h5>左墙</h5>
+                        <div class="row-3d"><span>镜像</span><input type="checkbox" id="cLX"></div>
+                        <div class="row-3d"><span>翻转</span><input type="checkbox" id="cLY"></div>
+                    </div>
+                    <div class="box-3d">
+                        <h5>右墙</h5>
+                        <div class="row-3d"><span>镜像</span><input type="checkbox" id="cRX" checked></div>
+                        <div class="row-3d"><span>翻转</span><input type="checkbox" id="cRY"></div>
+                    </div>
+                    <div class="box-3d">
+                        <h5>地面</h5>
+                        <div class="row-3d"><span>镜像</span><input type="checkbox" id="cFX" checked></div>
+                        <div class="row-3d"><span>翻转</span><input type="checkbox" id="cFY"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="glC" style="display:none"></canvas>
+    <canvas id="tBack" style="display:none"></canvas><canvas id="tLeft" style="display:none"></canvas>
+    <canvas id="tRight" style="display:none"></canvas><canvas id="tFloor" style="display:none"></canvas>
+
+    <script id="vsrc" type="x">
+        attribute vec2 aP,aT; varying vec2 vT;
+        void main(){gl_Position=vec4(aP,0,1);vT=aT;}
+    </script>
+    <script id="fsrc" type="x">
+        precision mediump float;
+        uniform sampler2D uTex; uniform float uT,uB,uL,uR,uS; varying vec2 vT;
+        void main(){
+            vec2 s=vT*2.0-1.0,c=s/uS;
+            float dx=c.x*c.x,dy=c.y*c.y;
+            float wy=(c.y>0.0)?uT:uB,wx=(c.x>0.0)?uR:uL;
+            vec2 d=vec2(c.x*(1.0-wx*dy),c.y*(1.0-wy*dx)),uv=(d+1.0)*0.5;
+            gl_FragColor=(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0)?vec4(0,0,0,1):texture2D(uTex,uv);
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+        // ===== 全局 =====
+        const vid = document.getElementById('vid');
+        const view2D = document.getElementById('view2D');
+        const ctx2D = view2D.getContext('2d');
+        const view3D = document.getElementById('view3D');
+        const glC = document.getElementById('glC');
+        const gl = glC.getContext('webgl', { preserveDrawingBuffer: true });
+        const handles = [0, 1, 2, 3, 4, 5, 6, 7].map(i => document.getElementById('h' + i));
+        const texCvs = { back: document.getElementById('tBack'), left: document.getElementById('tLeft'), right: document.getElementById('tRight'), floor: document.getElementById('tFloor') };
+
+        let glProg, glTex, pts = [], cW = 0, cH = 0, isVid = false, playing = false, mode = '2d', drag = -1;
+        let scene, camera, renderer, controls, room, mats = {}, threeInit = false;
+        let recorder = null, chunks = [];
+
+        const faces = { back: [0, 1, 3, 2], left: [4, 0, 2, 6], right: [1, 5, 7, 3], floor: [2, 3, 7, 6] };
+        const sliders = { top: 'rTop', bot: 'rBot', left: 'rLeft', right: 'rRight', scale: 'rScale' };
+        const vals = { top: 'vTop', bot: 'vBot', left: 'vLeft', right: 'vRight', scale: 'vScale' };
+
+        // ===== WebGL =====
+        function initGL() {
+            const vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, document.getElementById('vsrc').text); gl.compileShader(vs);
+            const fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, document.getElementById('fsrc').text); gl.compileShader(fs);
+            glProg = gl.createProgram(); gl.attachShader(glProg, vs); gl.attachShader(glProg, fs); gl.linkProgram(glProg); gl.useProgram(glProg);
+            const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1]), gl.STATIC_DRAW);
+            const aP = gl.getAttribLocation(glProg, 'aP'), aT = gl.getAttribLocation(glProg, 'aT');
+            gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aT); gl.vertexAttribPointer(aT, 2, gl.FLOAT, false, 16, 8);
+        }
+
+        function uploadTex(src) {
+            if (glTex) gl.deleteTexture(glTex);
+            glTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, glTex);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+        }
+
+        function renderGL() {
+            if (!glTex) return;
+            gl.bindTexture(gl.TEXTURE_2D, glTex);
+            // 视频时每帧更新纹理
+            if (isVid) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vid);
+            gl.uniform1f(gl.getUniformLocation(glProg, 'uT'), +document.getElementById('rTop').value);
+            gl.uniform1f(gl.getUniformLocation(glProg, 'uB'), +document.getElementById('rBot').value);
+            gl.uniform1f(gl.getUniformLocation(glProg, 'uL'), +document.getElementById('rLeft').value);
+            gl.uniform1f(gl.getUniformLocation(glProg, 'uR'), +document.getElementById('rRight').value);
+            gl.uniform1f(gl.getUniformLocation(glProg, 'uS'), +document.getElementById('rScale').value);
+            gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        // ===== 2D渲染 =====
+        function render2D() {
+            renderGL();
+            ctx2D.drawImage(glC, 0, 0, cW, cH);
+            // 画线
+            ctx2D.strokeStyle = 'cyan'; ctx2D.lineWidth = 2; ctx2D.beginPath();
+            [[0, 1], [1, 3], [3, 2], [2, 0], [0, 4], [1, 5], [2, 6], [3, 7], [4, 6], [5, 7], [6, 7]].forEach(([a, b]) => {
+                ctx2D.moveTo(pts[a].x, pts[a].y); ctx2D.lineTo(pts[b].x, pts[b].y);
+            });
+            ctx2D.stroke();
+            updateHandles();
+        }
+
+        function updateHandles() {
+            const r = view2D.getBoundingClientRect(), sx = r.width / cW, sy = r.height / cH;
+            pts.forEach((p, i) => {
+                handles[i].style.left = (view2D.offsetLeft + p.x * sx) + 'px';
+                handles[i].style.top = (view2D.offsetTop + p.y * sy) + 'px';
+                handles[i].style.display = mode === '2d' ? 'block' : 'none';
+            });
+        }
+
+        // ===== 贴图生成 =====
+        function genTextures() {
+            renderGL();
+            ctx2D.drawImage(glC, 0, 0, cW, cH);
+            const imgD = ctx2D.getImageData(0, 0, cW, cH);
+            let ar = 0, ag = 0, ab = 0, ac = 0;
+            for (let i = 0; i < imgD.data.length; i += 40) if (imgD.data[i + 3] > 0) { ar += imgD.data[i]; ag += imgD.data[i + 1]; ab += imgD.data[i + 2]; ac++; }
+            const avg = { r: ar / ac | 0, g: ag / ac | 0, b: ab / ac | 0 };
+
+            for (let k in faces) {
+                const idx = faces[k], ps = idx.map(i => pts[i]);
+                const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+                const w = Math.max(dist(ps[0], ps[1]), dist(ps[2], ps[3])) | 0;
+                const h = Math.max(dist(ps[0], ps[3]), dist(ps[1], ps[2])) | 0;
+                if (w < 1 || h < 1) continue;
+                const cvs = texCvs[k]; cvs.width = w; cvs.height = h;
+                const tctx = cvs.getContext('2d'), dD = tctx.createImageData(w, h);
+
+                // 单应性矩阵
+                let sx = [ps[0].x, ps[1].x, ps[2].x, ps[3].x], sy = [ps[0].y, ps[1].y, ps[2].y, ps[3].y];
+                let dx = [0, w, w, 0], dy = [0, 0, h, h], A = [], B = [];
+                for (let i = 0; i < 4; i++) {
+                    A.push([dx[i], dy[i], 1, 0, 0, 0, -sx[i] * dx[i], -sx[i] * dy[i]]);
+                    A.push([0, 0, 0, dx[i], dy[i], 1, -sy[i] * dx[i], -sy[i] * dy[i]]);
+                    B.push(sx[i]); B.push(sy[i]);
+                }
+                let H = null;
+                try {
+                    let n = 8;
+                    for (let i = 0; i < n; i++) {
+                        let m = i; for (let j = i + 1; j < n; j++)if (Math.abs(A[j][i]) > Math.abs(A[m][i])) m = j;
+                        [A[i], A[m]] = [A[m], A[i]];[B[i], B[m]] = [B[m], B[i]];
+                        for (let j = i + 1; j < n; j++) { let f = A[j][i] / A[i][i]; B[j] -= f * B[i]; for (let l = i; l < n; l++)A[j][l] -= f * A[i][l]; }
+                    }
+                    let x = Array(n);
+                    for (let i = n - 1; i >= 0; i--) { let s = 0; for (let j = i + 1; j < n; j++)s += A[i][j] * x[j]; x[i] = (B[i] - s) / A[i][i]; }
+                    H = [...x, 1];
+                } catch (e) { }
+                if (!H) continue;
+
+                for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+                    const z = H[6] * x + H[7] * y + H[8], u = (H[0] * x + H[1] * y + H[2]) / z, v = (H[3] * x + H[4] * y + H[5]) / z;
+                    const si = ((v | 0) * cW + (u | 0)) * 4, di = (y * w + x) * 4;
+                    if (u >= 0 && u < cW && v >= 0 && v < cH) dD.data.set(imgD.data.subarray(si, si + 4), di);
+                    else dD.data.set([avg.r, avg.g, avg.b, 255], di);
+                }
+                tctx.putImageData(dD, 0, 0);
+            }
+        }
+
+        // ===== Three.js =====
+        function init3D() {
+            scene = new THREE.Scene(); scene.background = new THREE.Color(0x111122);
+            const w = view3D.clientWidth || 700, h = view3D.clientHeight || 450;
+            camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 2000);
+            camera.position.set(0, 50, 350);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(w, h);
+            view3D.appendChild(renderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            scene.add(new THREE.AmbientLight(0xffffff, 2));
+
+            ['back', 'left', 'right', 'floor'].forEach(k => {
+                const tex = new THREE.CanvasTexture(texCvs[k]);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                mats[k] = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+            });
+            threeInit = true;
+        }
+
+        function updateMats() {
+            ['back', 'left', 'right', 'floor'].forEach(k => {
+                mats[k].map = new THREE.CanvasTexture(texCvs[k]);
+                mats[k].map.colorSpace = THREE.SRGBColorSpace;
+                mats[k].needsUpdate = true;
+            });
+        }
+
+        function buildRoom() {
+            if (room) scene.remove(room);
+            room = new THREE.Group();
+            const bw = texCvs.back.width || 100, bh = texCvs.back.height || 100;
+            const lw = texCvs.left.width || 100, rw = texCvs.right.width || 100;
+            const hs = +document.getElementById('r3H').value, ds = +document.getElementById('r3D').value;
+            const w = bw, h = bh * hs, d = (lw + rw) / 2 * ds;
+
+            const mkMesh = (mw, mh, mat, fx, fy) => {
+                const g = new THREE.PlaneGeometry(mw, mh), uv = g.attributes.uv;
+                for (let i = 0; i < uv.count; i++) { let u = uv.getX(i), v = uv.getY(i); if (fx) u = 1 - u; if (fy) v = 1 - v; uv.setXY(i, u, v); }
+                uv.needsUpdate = true;
+                return new THREE.Mesh(g, mat);
+            };
+            const flip = id => document.getElementById(id).checked;
+
+            const back = mkMesh(w, h, mats.back, flip('cBX'), flip('cBY')); back.position.z = -d / 2; room.add(back);
+            const left = mkMesh(d, h, mats.left, flip('cLX'), flip('cLY')); left.position.x = -w / 2; left.rotation.y = Math.PI / 2; room.add(left);
+            const right = mkMesh(d, h, mats.right, flip('cRX'), flip('cRY')); right.position.x = w / 2; right.rotation.y = -Math.PI / 2; room.add(right);
+            const floor = mkMesh(w, d, mats.floor, flip('cFX'), flip('cFY')); floor.position.y = -h / 2; floor.rotation.x = -Math.PI / 2; room.add(floor);
+            scene.add(room);
+        }
+
+        // ===== 主循环 =====
+        function mainLoop() {
+            requestAnimationFrame(mainLoop);
+
+            if (isVid && playing) {
+                updateProgress();
+            }
+
+            if (mode === '2d') {
+                if (playing || !isVid) render2D();
+            } else {
+                // 3D模式：实时更新纹理
+                if (playing) {
+                    genTextures();
+                    updateMats();
+                }
+                if (threeInit) {
+                    controls.update();
+                    renderer.render(scene, camera);
+                }
+            }
+        }
+
+        // ===== 加载 =====
+        function setup(w, h) {
+            const mw = Math.min(700, innerWidth * 0.5), mh = innerHeight * 0.55;
+            if (w > mw || h > mh) { const r = Math.min(mw / w, mh / h); w *= r; h *= r; }
+            cW = w; cH = h;
+            glC.width = w; glC.height = h; gl.viewport(0, 0, w, h);
+            view2D.width = w; view2D.height = h;
+            const cx = w / 2, cy = h / 2;
+            pts = [
+                { x: cx - w * 0.2, y: cy - h * 0.2 }, { x: cx + w * 0.2, y: cy - h * 0.2 },
+                { x: cx - w * 0.2, y: cy + h * 0.2 }, { x: cx + w * 0.2, y: cy + h * 0.2 },
+                { x: cx - w * 0.4, y: cy - h * 0.4 }, { x: cx + w * 0.4, y: cy - h * 0.4 },
+                { x: cx - w * 0.4, y: cy + h * 0.4 }, { x: cx + w * 0.4, y: cy + h * 0.4 }
+            ];
+        }
+
+        function resetSliders() {
+            ['rTop', 'rBot', 'rLeft', 'rRight'].forEach(id => document.getElementById(id).value = 0);
+            document.getElementById('rScale').value = 1;
+            updateSliderVals();
+        }
+
+        function updateSliderVals() {
+            document.getElementById('vTop').textContent = (+document.getElementById('rTop').value).toFixed(2);
+            document.getElementById('vBot').textContent = (+document.getElementById('rBot').value).toFixed(2);
+            document.getElementById('vLeft').textContent = (+document.getElementById('rLeft').value).toFixed(2);
+            document.getElementById('vRight').textContent = (+document.getElementById('rRight').value).toFixed(2);
+            document.getElementById('vScale').textContent = (+document.getElementById('rScale').value).toFixed(2);
+        }
+
+        function showUI(hasVid) {
+            document.getElementById('mainArea').style.display = 'flex';
+            document.getElementById('tabs').style.display = 'flex';
+            document.getElementById('playbar').style.display = hasVid ? 'block' : 'none';
+            document.getElementById('btnSave').style.display = 'inline-block';
+            document.getElementById('btnRec').style.display = hasVid ? 'inline-block' : 'none';
+            document.getElementById('btnGLB').style.display = 'inline-block';
+        }
+
+        document.getElementById('fileVideo').onchange = e => {
+            const f = e.target.files[0]; if (!f) return;
+            vid.src = URL.createObjectURL(f);
+            vid.onloadedmetadata = () => { isVid = true; setup(vid.videoWidth, vid.videoHeight); };
+            vid.oncanplay = () => { uploadTex(vid); resetSliders(); showUI(true); render2D(); };
+        };
+
+        document.getElementById('fileImage').onchange = e => {
+            const f = e.target.files[0]; if (!f) return;
+            const img = new Image(); img.onload = () => {
+                isVid = false; setup(img.width, img.height); uploadTex(img); resetSliders(); showUI(false); render2D();
+            };
+            img.src = URL.createObjectURL(f);
+        };
+
+        // ===== 播放控制 =====
+        function updateProgress() {
+            const p = (vid.currentTime / vid.duration) * 100 || 0;
+            document.getElementById('progFill').style.width = p + '%';
+            const fmt = t => `${(t / 60 | 0).toString().padStart(2, '0')}:${(t % 60 | 0).toString().padStart(2, '0')}`;
+            document.getElementById('timeDisp').textContent = `${fmt(vid.currentTime)} / ${fmt(vid.duration || 0)}`;
+        }
+
+        document.getElementById('btnPlay').onclick = () => {
+            if (vid.paused) { vid.play(); playing = true; document.getElementById('btnPlay').textContent = '⏸️'; }
+            else { vid.pause(); playing = false; document.getElementById('btnPlay').textContent = '▶️'; }
+        };
+        document.getElementById('prog').onclick = e => {
+            const r = e.currentTarget.getBoundingClientRect();
+            vid.currentTime = (e.clientX - r.left) / r.width * vid.duration;
+            uploadTex(vid); render2D(); updateProgress();
+        };
+        document.getElementById('btnPrev').onclick = () => { vid.currentTime = Math.max(0, vid.currentTime - 1 / 30); uploadTex(vid); render2D(); };
+        document.getElementById('btnNext').onclick = () => { vid.currentTime = Math.min(vid.duration, vid.currentTime + 1 / 30); uploadTex(vid); render2D(); };
+
+        // ===== 视图切换 =====
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                mode = tab.dataset.v;
+                view2D.style.display = mode === '2d' ? 'block' : 'none';
+                view3D.style.display = mode === '3d' ? 'block' : 'none';
+                document.getElementById('sec3D').style.display = mode === '3d' ? 'block' : 'none';
+                updateHandles();
+                if (mode === '3d') {
+                    genTextures();
+                    if (!threeInit) init3D();
+                    else updateMats();
+                    buildRoom();
+                }
+            };
+        });
+
+        // ===== 拖动控制点 =====
+        handles.forEach((h, i) => {
+            h.onmousedown = e => { e.preventDefault(); drag = i; };
+            h.ontouchstart = e => { e.preventDefault(); drag = i; };
+        });
+        const onMove = e => {
+            if (drag < 0) return; e.preventDefault();
+            const r = view2D.getBoundingClientRect();
+            const x = (e.touches ? e.touches[0].clientX : e.clientX);
+            const y = (e.touches ? e.touches[0].clientY : e.clientY);
+            pts[drag].x = Math.max(0, Math.min(cW, (x - r.left) * (cW / r.width)));
+            pts[drag].y = Math.max(0, Math.min(cH, (y - r.top) * (cH / r.height)));
+            render2D();
+        };
+        addEventListener('mousemove', onMove);
+        addEventListener('touchmove', onMove, { passive: false });
+        addEventListener('mouseup', () => drag = -1);
+        addEventListener('touchend', () => drag = -1);
+
+        // ===== 滑块 =====
+        ['rTop', 'rBot', 'rLeft', 'rRight', 'rScale'].forEach(id => {
+            document.getElementById(id).oninput = () => { updateSliderVals(); render2D(); };
+        });
+
+        // ===== 3D参数 =====
+        document.getElementById('r3H').oninput = () => { document.getElementById('v3H').textContent = document.getElementById('r3H').value; if (threeInit) buildRoom(); };
+        document.getElementById('r3D').oninput = () => { document.getElementById('v3D').textContent = document.getElementById('r3D').value; if (threeInit) buildRoom(); };
+        ['cBX', 'cBY', 'cLX', 'cLY', 'cRX', 'cRY', 'cFX', 'cFY'].forEach(id => {
+            document.getElementById(id).onchange = () => { if (threeInit) buildRoom(); };
+        });
+
+        // ===== 保存/录制/GLB =====
+        document.getElementById('btnSave').onclick = () => {
+            const cvs = mode === '3d' ? renderer.domElement : view2D;
+            const a = document.createElement('a'); a.download = `frame_${Date.now()}.png`; a.href = cvs.toDataURL(); a.click();
+        };
+
+        document.getElementById('btnRec').onclick = () => {
+            if (recorder && recorder.state === 'recording') {
+                recorder.stop(); vid.pause(); playing = false;
+            } else {
+                chunks = [];
+                const cvs = mode === '3d' ? renderer.domElement : view2D;
+                const stream = cvs.captureStream(30);
+                recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+                recorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `recording_${Date.now()}.webm`; a.click();
+                    document.getElementById('recBadge').classList.remove('show');
+                    document.getElementById('btnRec').textContent = '⏺️ 录制';
+                };
+                recorder.start();
+                document.getElementById('recBadge').classList.add('show');
+                document.getElementById('btnRec').textContent = '⏹️ 停止';
+                vid.currentTime = 0; vid.play(); playing = true; document.getElementById('btnPlay').textContent = '⏸️';
+                vid.onended = () => { if (recorder.state === 'recording') recorder.stop(); playing = false; };
+            }
+        };
+
+        document.getElementById('btnGLB').onclick = () => {
+            if (!threeInit) { alert('请先切换到3D视图'); return; }
+            new GLTFExporter().parse(room, gltf => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([gltf], { type: 'application/octet-stream' }));
+                a.download = 'model.glb'; a.click();
+            }, e => console.error(e), { binary: true, embedImages: true });
+        };
+
+        // ===== 启动 =====
+        initGL();
+        mainLoop();
+    </script>
+</body>
+
+</html>

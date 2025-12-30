@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>GLB Interactive Mapper</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
+    <style>
+        html,
+        body {
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="ui-container"></div>
+    <canvas id="renderCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById("renderCanvas");
+        const engine = new BABYLON.Engine(canvas, true);
+
+        const TEXTURES = [
+            "textures/split4_qian.png",
+            "textures/split4_you.png",
+            "textures/split4_zuo.png",
+            "textures/split4_xia.png",
+            "textures/floor.png",
+            "textures/wall_front.png",
+            "textures/wall_back.png",
+            "textures/wall_left.png",
+            "textures/wall_right.png"
+        ];
+
+        const TARGET_MATERIALS = [
+            "Material.001",
+            "Material.002",
+            "Material.003",
+            "Material.004",
+            "Material.005"
+        ];
+
+        const createScene = async function () {
+            const scene = new BABYLON.Scene(engine);
+
+            // Camera
+            const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 10, new BABYLON.Vector3(0, 0, 0), scene);
+            camera.attachControl(canvas, true);
+            camera.wheelPrecision = 50;
+
+            // Light
+            const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
+            light.intensity = 1.2;
+
+            // Load Model
+            console.log("Loading model...");
+            try {
+                const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./", "Untitled4.glb", scene);
+                console.log("Model loaded");
+                const root = result.meshes[0];
+
+                // Adjust camera target to mesh center
+                root.normalizeToUnitCube();
+
+                // Setup GUI
+                const gui = new dat.GUI({ autoPlace: false });
+                document.getElementById('ui-container').appendChild(gui.domElement);
+
+                const config = {};
+
+                // Helper to apply texture
+                const applyTexture = (matName, texPath, transform) => {
+                    const material = scene.getMaterialByName(matName);
+                    if (!material) return;
+
+                    if (!texPath) {
+                        material.albedoTexture = null;
+                        return;
+                    }
+
+                    const tex = new BABYLON.Texture(texPath, scene);
+                    // Apply transforms
+                    tex.wAng = transform.rotation * (Math.PI / 180);
+                    // Scale -1 for mirror
+                    tex.uScale = transform.mirrorH ? -1 : 1;
+                    tex.vScale = transform.mirrorV ? -1 : 1;
+
+                    material.albedoTexture = tex;
+                    material.albedoColor = new BABYLON.Color3(1, 1, 1); // Reset color
+                    material.roughness = 1.0;
+                    material.metallic = 0.0;
+                };
+
+                // Default Configuration
+                const defaultSettings = {
+                    "Material.001": { texture: "textures/split4_zuo.png", rotation: 0, mirrorH: false, mirrorV: true },
+                    "Material.002": { texture: "textures/split4_qian.png", rotation: 270, mirrorH: false, mirrorV: false },
+                    "Material.003": { texture: "textures/split4_you.png", rotation: 270, mirrorH: false, mirrorV: true },
+                    "Material.004": { texture: "", rotation: 0, mirrorH: false, mirrorV: false },
+                    "Material.005": { texture: "textures/split4_xia.png", rotation: 270, mirrorH: false, mirrorV: true }
+                };
+
+                TARGET_MATERIALS.forEach(matName => {
+                    const f = gui.addFolder(matName);
+
+                    // Initialize with defaults if available, otherwise clear
+                    config[matName] = defaultSettings[matName] || {
+                        texture: "",
+                        rotation: 0,
+                        mirrorH: false,
+                        mirrorV: false
+                    };
+
+                    // Texture Selector
+                    const update = () => applyTexture(matName, config[matName].texture, config[matName]);
+
+                    // Trigger initial update to apply defaults
+                    update();
+
+                    f.add(config[matName], 'texture', ["", ...TEXTURES]).onChange(update);
+                    f.add(config[matName], 'rotation', 0, 360, 90).onChange(update);
+                    f.add(config[matName], 'mirrorH').name("Mirror Horizontal").onChange(update);
+                    f.add(config[matName], 'mirrorV').name("Mirror Vertical").onChange(update);
+                    f.open();
+                });
+
+                // Export Button
+                const exportObj = {
+                    exportConfig: () => {
+                        const exportData = TARGET_MATERIALS.map(m => ({
+                            name: m,
+                            img: config[m].texture,
+                            rotation: config[m].rotation,
+                            mirrorH: config[m].mirrorH,
+                            mirrorV: config[m].mirrorV
+                        }));
+                        console.log(JSON.stringify(exportData, null, 2));
+                        alert("Configuration copied to console!");
+                    }
+                };
+                gui.add(exportObj, 'exportConfig').name("Export Config to Console");
+
+            } catch (e) {
+                console.error(e);
+                alert("Error loading model. Make sure you are running a local server (CORS).");
+            }
+
+            return scene;
+        };
+
+        createScene().then(scene => {
+            engine.runRenderLoop(function () {
+                scene.render();
+            });
+        });
+
+        window.addEventListener("resize", function () {
+            engine.resize();
+        });
+    </script>
+</body>
+
+</html>

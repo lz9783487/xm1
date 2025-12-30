@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>去畸变 + 3D 教室重建</title>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+            }
+        }
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a1a;
+            color: #f0f0f0;
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        h2 {
+            text-align: center;
+            margin: 15px 0;
+            font-size: 1.5rem;
+        }
+
+        /* 步骤指示器 */
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 0 15px;
+            flex-wrap: wrap;
+        }
+
+        .step {
+            padding: 8px 16px;
+            background: #333;
+            border-radius: 20px;
+            font-size: 13px;
+            opacity: 0.5;
+            transition: all 0.3s;
+        }
+
+        .step.active {
+            opacity: 1;
+            background: #007bff;
+        }
+
+        .step.done {
+            opacity: 1;
+            background: #28a745;
+        }
+
+        /* 控制按钮 */
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 0 15px 20px 15px;
+        }
+
+        button,
+        .btn-label {
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0069d9;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-warning:hover {
+            background: #e0a800;
+        }
+
+        .btn-purple {
+            background: #6f42c1;
+            color: white;
+        }
+
+        .btn-purple:hover {
+            background: #5a32a3;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        /* ======== 阶段1: 去畸变 ======== */
+        #stage-distortion {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            padding: 0 15px;
+        }
+
+        #distortion-canvas-wrapper {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            max-height: 60vh;
+            overflow: hidden;
+            background: #000;
+            background-image: linear-gradient(45deg, #222 25%, transparent 25%), linear-gradient(-45deg, #222 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #222 75%), linear-gradient(-45deg, transparent 75%, #222 75%);
+            background-size: 20px 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        #distortion-canvas-wrapper canvas {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .distortion-controls {
+            width: 100%;
+            padding: 15px;
+            background: #2a2a2a;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            border-radius: 8px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-group label {
+            font-size: 12px;
+            color: #aaa;
+            display: flex;
+            justify-content: space-between;
+            white-space: nowrap;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .divider {
+            height: 1px;
+            background: #444;
+            grid-column: 1 / -1;
+            margin: 5px 0;
+        }
+
+        .group-title {
+            grid-column: 1 / -1;
+            font-size: 14px;
+            font-weight: bold;
+            color: #ddd;
+            margin-top: 5px;
+        }
+
+        /* ======== 阶段2: 分割编辑 ======== */
+        #stage-segmentation {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            padding: 0 15px;
+        }
+
+        .editor-container {
+            position: relative;
+            line-height: 0;
+            user-select: none;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            overflow: visible;
+        }
+
+        .editor-container canvas {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 8px;
+        }
+
+        .handle {
+            width: 18px;
+            height: 18px;
+            background: rgba(255, 69, 0, 0.9);
+            border: 2px solid white;
+            border-radius: 50%;
+            position: absolute;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            z-index: 20;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+        }
+
+        .handle.front {
+            background: rgba(0, 150, 255, 0.9);
+        }
+
+        /* ======== 阶段3: 3D 预览 ======== */
+        #stage-3d {
+            display: none;
+            flex-direction: column;
+            padding: 0 15px;
+            gap: 15px;
+        }
+
+        .adjust-panel {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+        }
+
+        .adjust-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 10px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #333;
+        }
+
+        .adjust-group h4 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #ccc;
+            border-bottom: 2px solid #555;
+            padding-bottom: 5px;
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+
+        .control-row input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .slider-row {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-size: 13px;
+            grid-column: 1 / -1;
+            background: #333;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #444;
+        }
+
+        .slider-row label {
+            color: #ccc;
+        }
+
+        #threeContainer {
+            width: 100%;
+            height: 500px;
+            background: #222;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #threeContainer::after {
+            content: '左键旋转 | 右键平移 | 滚轮缩放';
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        /* 隐藏中间结果画布 */
+        #hiddenCanvases {
+            display: none;
+        }
+
+        /* 欢迎屏幕 */
+        #welcome-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 30px;
+            text-align: center;
+        }
+
+        #welcome-screen p {
+            color: #888;
+            font-size: 16px;
+            max-width: 500px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>📷 去畸变 + 3D 教室重建</h2>
+
+    <!-- 步骤指示器 -->
+    <div class="step-indicator">
+        <div class="step" id="step1">1. 导入图片</div>
+        <div class="step" id="step2">2. 去畸变</div>
+        <div class="step" id="step3">3. 分割贴图</div>
+        <div class="step" id="step4">4. 3D 预览</div>
+    </div>
+
+    <!-- 控制按钮 -->
+    <div class="controls">
+        <label for="upload" class="btn-label btn-primary">📂 导入图片</label>
+        <input type="file" id="upload" accept="image/*">
+        <button id="btnApplyDistortion" class="btn-success" style="display:none;">✅ 应用去畸变</button>
+        <button id="btnGenTextures" class="btn-warning" style="display:none;">🖼️ 生成贴图</button>
+        <button id="btnPreview3D" class="btn-purple" style="display:none;">🎮 3D 预览</button>
+        <button id="btnExportGLB" class="btn-success" style="display:none;">📦 导出 GLB</button>
+        <button id="btnSaveDistorted" class="btn-primary" style="display:none;">💾 保存去畸变图片</button>
+    </div>
+
+    <!-- 欢迎屏幕 -->
+    <div id="welcome-screen">
+        <p>👋 欢迎使用！请点击上方 <strong>"导入图片"</strong> 开始处理。</p>
+        <p>工作流程：导入 → 去畸变调整 → 分割区域 → 3D 预览 → 导出</p>
+    </div>
+
+    <!-- 阶段1: 去畸变 -->
+    <div id="stage-distortion">
+        <div id="distortion-canvas-wrapper">
+            <canvas id="glcanvas"></canvas>
+        </div>
+        <div class="distortion-controls">
+            <div class="group-title">垂直方向弧度调整</div>
+            <div class="control-group">
+                <label>⬆️ 上边弧度 (Top) <span id="val-top">0.0</span></label>
+                <input type="range" id="c-top" min="-2.0" max="2.0" step="0.01" value="0.0">
+            </div>
+            <div class="control-group">
+                <label>⬇️ 下边弧度 (Bottom) <span id="val-bottom">0.0</span></label>
+                <input type="range" id="c-bottom" min="-2.0" max="2.0" step="0.01" value="0.0">
+            </div>
+
+            <div class="divider"></div>
+            <div class="group-title">水平方向弧度调整</div>
+
+            <div class="control-group">
+                <label>⬅️ 左边弧度 (Left) <span id="val-left">0.0</span></label>
+                <input type="range" id="c-left" min="-2.0" max="2.0" step="0.01" value="0.0">
+            </div>
+            <div class="control-group">
+                <label>➡️ 右边弧度 (Right) <span id="val-right">0.0</span></label>
+                <input type="range" id="c-right" min="-2.0" max="2.0" step="0.01" value="0.0">
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="control-group" style="grid-column: 1 / -1;">
+                <label>🔍 全局缩放 (Zoom) <span id="val-scale">1.0</span></label>
+                <input type="range" id="scale" min="0.5" max="5.0" step="0.01" value="1.0">
+            </div>
+        </div>
+    </div>
+
+    <!-- 阶段2: 分割编辑 -->
+    <div id="stage-segmentation">
+        <div class="editor-container" id="editorStage">
+            <canvas id="srcCanvas"></canvas>
+            <div class="handle back" id="p0"></div>
+            <div class="handle back" id="p1"></div>
+            <div class="handle back" id="p2"></div>
+            <div class="handle back" id="p3"></div>
+            <div class="handle front" id="p4"></div>
+            <div class="handle front" id="p5"></div>
+            <div class="handle front" id="p6"></div>
+            <div class="handle front" id="p7"></div>
+        </div>
+        <p style="color: #888; text-align: center;">🎯 拖动控制点调整分割区域。<br>蓝色 = 前景边界，橙色 = 后墙边界</p>
+    </div>
+
+    <!-- 阶段3: 3D 预览 -->
+    <div id="stage-3d">
+        <div class="adjust-panel">
+            <div class="slider-row">
+                <label>📏 教室高度比例 (Height Scale): <span id="heightVal">1.0</span></label>
+                <input type="range" id="heightSlider" min="0.5" max="3.0" step="0.1" value="1.0">
+            </div>
+
+            <div class="slider-row">
+                <label>📐 教室进深比例 (Depth Scale): <span id="depthVal">1.0</span></label>
+                <input type="range" id="depthSlider" min="0.5" max="4.0" step="0.1" value="1.0">
+            </div>
+
+            <div class="adjust-group">
+                <h4>后面 (Back Wall)</h4>
+                <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkBackX" checked></div>
+                <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkBackY"></div>
+            </div>
+            <div class="adjust-group">
+                <h4>左面 (Left Wall)</h4>
+                <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkLeftX"></div>
+                <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkLeftY"></div>
+            </div>
+            <div class="adjust-group">
+                <h4>右面 (Right Wall)</h4>
+                <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkRightX" checked></div>
+                <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkRightY"></div>
+            </div>
+            <div class="adjust-group">
+                <h4>地面 (Floor)</h4>
+                <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkBottomX" checked></div>
+                <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkBottomY"></div>
+            </div>
+        </div>
+
+        <div id="threeContainer"></div>
+    </div>
+
+    <!-- 隐藏的中间结果画布 -->
+    <div id="hiddenCanvases">
+        <canvas id="resBack"></canvas>
+        <canvas id="resLeft"></canvas>
+        <canvas id="resRight"></canvas>
+        <canvas id="resBottom"></canvas>
+        <canvas id="distortedResult"></canvas>
+    </div>
+
+    <!-- ================== 去畸变 WebGL Shader ================== -->
+    <script id="vs" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    attribute vec2 a_texCoord;
+    varying vec2 v_texCoord;
+    void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_texCoord = a_texCoord;
+    }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform sampler2D u_image;
+    uniform float u_top;
+    uniform float u_bottom;
+    uniform float u_left;
+    uniform float u_right;
+    uniform float u_scale;
+    varying vec2 v_texCoord;
+
+    void main() {
+        vec2 st = v_texCoord * 2.0 - 1.0;
+        vec2 scaledST = st / u_scale;
+        float dx2 = scaledST.x * scaledST.x;
+        float dy2 = scaledST.y * scaledST.y;
+        float warpCoefY = (scaledST.y > 0.0) ? u_top : u_bottom;
+        float warpCoefX = (scaledST.x > 0.0) ? u_right : u_left;
+        float factorX = 1.0 - warpCoefX * dy2;
+        float factorY = 1.0 - warpCoefY * dx2;
+        vec2 distortedST = vec2(scaledST.x * factorX, scaledST.y * factorY);
+        vec2 finalUV = (distortedST + 1.0) * 0.5;
+        if (finalUV.x < 0.0 || finalUV.x > 1.0 || finalUV.y < 0.0 || finalUV.y > 1.0) {
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        } else {
+            gl_FragColor = texture2D(u_image, finalUV);
+        }
+    }
+    </script>
+
+    <!-- ================== 主要 JavaScript ================== -->
+    <script>
+        // --- 全局状态 ---
+        let currentStage = 0; // 0=欢迎, 1=去畸变, 2=分割, 3=3D
+        let originalImage = null; // 原始导入的图片
+
+        // --- DOM 元素 ---
+        const uploadInput = document.getElementById('upload');
+        const btnApplyDistortion = document.getElementById('btnApplyDistortion');
+        const btnGenTextures = document.getElementById('btnGenTextures');
+        const btnPreview3D = document.getElementById('btnPreview3D');
+        const btnExportGLB = document.getElementById('btnExportGLB');
+        const btnSaveDistorted = document.getElementById('btnSaveDistorted');
+
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const stageDistortion = document.getElementById('stage-distortion');
+        const stageSegmentation = document.getElementById('stage-segmentation');
+        const stage3D = document.getElementById('stage-3d');
+
+        // --- 步骤指示器更新 ---
+        function updateStepIndicator(step) {
+            for (let i = 1; i <= 4; i++) {
+                const el = document.getElementById('step' + i);
+                el.classList.remove('active', 'done');
+                if (i < step) el.classList.add('done');
+                else if (i === step) el.classList.add('active');
+            }
+        }
+
+        function showStage(stage) {
+            currentStage = stage;
+            welcomeScreen.style.display = stage === 0 ? 'flex' : 'none';
+            stageDistortion.style.display = stage === 1 ? 'flex' : 'none';
+            stageSegmentation.style.display = stage === 2 ? 'flex' : 'none';
+            stage3D.style.display = stage === 3 ? 'flex' : 'none';
+
+            btnApplyDistortion.style.display = stage === 1 ? 'inline-flex' : 'none';
+            btnSaveDistorted.style.display = stage === 1 ? 'inline-flex' : 'none';
+            btnGenTextures.style.display = stage === 2 ? 'inline-flex' : 'none';
+            btnPreview3D.style.display = stage === 2 ? 'inline-flex' : 'none';
+            btnExportGLB.style.display = stage === 3 ? 'inline-flex' : 'none';
+
+            if (stage === 3) {
+                btnPreview3D.style.display = 'inline-flex';
+            }
+
+            updateStepIndicator(stage);
+        }
+
+        // ================== 去畸变部分 ==================
+        const glCanvas = document.getElementById('glcanvas');
+        const gl = glCanvas.getContext('webgl', { preserveDrawingBuffer: true });
+
+        const distortInputs = {
+            top: document.getElementById('c-top'),
+            bottom: document.getElementById('c-bottom'),
+            left: document.getElementById('c-left'),
+            right: document.getElementById('c-right'),
+            scale: document.getElementById('scale')
+        };
+
+        let glProgram;
+        let glTexture;
+
+        if (!gl) { alert("您的浏览器不支持 WebGL"); }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function initWebGL() {
+            const vsSource = document.getElementById('vs').text;
+            const fsSource = document.getElementById('fs').text;
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            glProgram = gl.createProgram();
+            gl.attachShader(glProgram, vertexShader);
+            gl.attachShader(glProgram, fragmentShader);
+            gl.linkProgram(glProgram);
+            gl.useProgram(glProgram);
+
+            const vertices = new Float32Array([-1.0, -1.0, 0.0, 0.0, 1.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+            const a_position = gl.getAttribLocation(glProgram, "a_position");
+            const a_texCoord = gl.getAttribLocation(glProgram, "a_texCoord");
+            gl.enableVertexAttribArray(a_position);
+            gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 4 * 4, 0);
+            gl.enableVertexAttribArray(a_texCoord);
+            gl.vertexAttribPointer(a_texCoord, 2, gl.FLOAT, false, 4 * 4, 2 * 4);
+        }
+
+        function loadImageToDistortion(src) {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = function () {
+                originalImage = img;
+
+                const maxWidth = window.innerWidth * 0.9;
+                const maxHeight = window.innerHeight * 0.5;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > maxWidth || height > maxHeight) {
+                    const ratio = Math.min(maxWidth / width, maxHeight / height);
+                    width *= ratio;
+                    height *= ratio;
+                }
+
+                glCanvas.width = width;
+                glCanvas.height = height;
+                gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+
+                if (glTexture) gl.deleteTexture(glTexture);
+                glTexture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, glTexture);
+
+                gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+
+                // 重置滑块
+                Object.values(distortInputs).forEach(input => {
+                    if (input.id !== 'scale') input.value = 0.0;
+                    else input.value = 1.0;
+                    updateDistortVal(input.id.replace('c-', ''), input.value);
+                });
+                renderDistortion();
+            };
+            img.src = src;
+        }
+
+        function renderDistortion() {
+            if (!glTexture) return;
+            const u_top = gl.getUniformLocation(glProgram, "u_top");
+            const u_bottom = gl.getUniformLocation(glProgram, "u_bottom");
+            const u_left = gl.getUniformLocation(glProgram, "u_left");
+            const u_right = gl.getUniformLocation(glProgram, "u_right");
+            const u_scale = gl.getUniformLocation(glProgram, "u_scale");
+
+            gl.uniform1f(u_top, parseFloat(distortInputs.top.value));
+            gl.uniform1f(u_bottom, parseFloat(distortInputs.bottom.value));
+            gl.uniform1f(u_left, parseFloat(distortInputs.left.value));
+            gl.uniform1f(u_right, parseFloat(distortInputs.right.value));
+            gl.uniform1f(u_scale, parseFloat(distortInputs.scale.value));
+
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        function updateDistortVal(id, val) {
+            const displayId = id === 'scale' ? 'val-scale' : 'val-' + id;
+            const el = document.getElementById(displayId);
+            if (el) el.innerText = val;
+        }
+
+        Object.keys(distortInputs).forEach(key => {
+            distortInputs[key].addEventListener('input', (e) => {
+                updateDistortVal(key, e.target.value);
+                renderDistortion();
+            });
+        });
+
+        // ================== 分割编辑部分 ==================
+        const srcCanvas = document.getElementById('srcCanvas');
+        const ctxSrc = srcCanvas.getContext('2d', { willReadFrequently: true });
+        const handles = Array.from({ length: 8 }, (_, i) => document.getElementById(`p${i}`));
+        const resCanvases = {
+            back: document.getElementById('resBack'),
+            left: document.getElementById('resLeft'),
+            right: document.getElementById('resRight'),
+            bottom: document.getElementById('resBottom')
+        };
+
+        let segImg = new Image();
+        let points = Array(8).fill().map(_ => ({ x: 0, y: 0 }));
+        let activeIdx = -1;
+        let imgData = null;
+        const faces = { back: [0, 1, 3, 2], left: [4, 0, 2, 6], right: [1, 5, 7, 3], bottom: [2, 3, 7, 6] };
+
+        function initSegmentationEditor(imageSrc) {
+            segImg = new Image();
+            segImg.crossOrigin = "anonymous";
+            segImg.onload = function () {
+                srcCanvas.width = segImg.width;
+                srcCanvas.height = segImg.height;
+                ctxSrc.drawImage(segImg, 0, 0);
+                imgData = ctxSrc.getImageData(0, 0, segImg.width, segImg.height);
+
+                // 初始化控制点
+                const w = segImg.width, h = segImg.height, cx = w / 2, cy = h / 2;
+                points[0] = { x: cx - w * 0.2, y: cy - h * 0.2 };
+                points[1] = { x: cx + w * 0.2, y: cy - h * 0.2 };
+                points[2] = { x: cx - w * 0.2, y: cy + h * 0.2 };
+                points[3] = { x: cx + w * 0.2, y: cy + h * 0.2 };
+                points[4] = { x: cx - w * 0.4, y: cy - h * 0.4 };
+                points[5] = { x: cx + w * 0.4, y: cy - h * 0.4 };
+                points[6] = { x: cx - w * 0.4, y: cy + h * 0.4 };
+                points[7] = { x: cx + w * 0.4, y: cy + h * 0.4 };
+
+                drawSegmentationEditor();
+            };
+            segImg.src = imageSrc;
+        }
+
+        function drawSegmentationEditor() {
+            ctxSrc.clearRect(0, 0, srcCanvas.width, srcCanvas.height);
+            ctxSrc.drawImage(segImg, 0, 0);
+            ctxSrc.strokeStyle = 'cyan';
+            ctxSrc.lineWidth = 2;
+            ctxSrc.beginPath();
+            const link = (a, b) => {
+                ctxSrc.moveTo(points[a].x, points[a].y);
+                ctxSrc.lineTo(points[b].x, points[b].y);
+            };
+            [0, 1, 3, 2].reduce((a, b) => { link(a, b); return b }, 2);
+            link(0, 4); link(1, 5); link(2, 6); link(3, 7);
+            link(4, 6); link(5, 7); link(6, 7);
+            ctxSrc.stroke();
+            points.forEach((p, i) => {
+                handles[i].style.left = p.x / segImg.width * 100 + '%';
+                handles[i].style.top = p.y / segImg.height * 100 + '%';
+            });
+        }
+
+        handles.forEach((h, i) => {
+            h.onmousedown = e => { e.preventDefault(); e.stopPropagation(); activeIdx = i };
+            h.ontouchstart = e => { e.preventDefault(); activeIdx = i };
+        });
+
+        const move = e => {
+            if (activeIdx < 0) return;
+            e.preventDefault();
+            const rect = srcCanvas.getBoundingClientRect();
+            const cx = e.touches ? e.touches[0].clientX : e.clientX;
+            const cy = e.touches ? e.touches[0].clientY : e.clientY;
+            points[activeIdx].x = (cx - rect.left) * (srcCanvas.width / rect.width);
+            points[activeIdx].y = (cy - rect.top) * (srcCanvas.height / rect.height);
+            drawSegmentationEditor();
+        };
+        window.onmousemove = move;
+        window.ontouchmove = move;
+        window.onmouseup = () => activeIdx = -1;
+        window.ontouchend = () => activeIdx = -1;
+
+        function performTextures() {
+            if (!imgData) return alert('请先应用去畸变');
+            const avg = getAvgColor(imgData);
+            for (let k in faces) warp(faces[k], resCanvases[k], avg);
+            alert("贴图已生成！点击 【3D 预览】 查看效果");
+        }
+
+        function warp(idx, cvs, fill) {
+            const ps = idx.map(i => points[i]);
+            const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+            const w = Math.max(dist(ps[0], ps[1]), dist(ps[2], ps[3])) | 0;
+            const h = Math.max(dist(ps[0], ps[3]), dist(ps[1], ps[2])) | 0;
+            cvs.width = w;
+            cvs.height = h;
+            const ctx = cvs.getContext('2d');
+            const dDst = ctx.createImageData(w, h);
+            const H = calcH(w, h, ps);
+            if (!H) return;
+
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const z = H[6] * x + H[7] * y + H[8];
+                    const u = (H[0] * x + H[1] * y + H[2]) / z;
+                    const v = (H[3] * x + H[4] * y + H[5]) / z;
+                    const srcIdx = ((v | 0) * srcCanvas.width + (u | 0)) * 4;
+                    const dstIdx = (y * w + x) * 4;
+                    if (u >= 0 && u < srcCanvas.width && v >= 0 && v < srcCanvas.height) {
+                        dDst.data.set(imgData.data.subarray(srcIdx, srcIdx + 4), dstIdx);
+                    } else {
+                        dDst.data.set([fill.r, fill.g, fill.b, 255], dstIdx);
+                    }
+                }
+            }
+            ctx.putImageData(dDst, 0, 0);
+        }
+
+        function calcH(w, h, p) {
+            let sx = [p[0].x, p[1].x, p[2].x, p[3].x], sy = [p[0].y, p[1].y, p[2].y, p[3].y];
+            let dx = [0, w, w, 0], dy = [0, 0, h, h];
+            let A = [], B = [];
+            for (let i = 0; i < 4; i++) {
+                A.push([dx[i], dy[i], 1, 0, 0, 0, -sx[i] * dx[i], -sx[i] * dy[i]]);
+                A.push([0, 0, 0, dx[i], dy[i], 1, -sy[i] * dx[i], -sy[i] * dy[i]]);
+                B.push(sx[i]);
+                B.push(sy[i]);
+            }
+            const solve = (A, b) => {
+                let n = 8;
+                for (let i = 0; i < n; i++) {
+                    let max = i;
+                    for (let k = i + 1; k < n; k++)
+                        if (Math.abs(A[k][i]) > Math.abs(A[max][i])) max = k;
+                    [A[i], A[max]] = [A[max], A[i]];
+                    [b[i], b[max]] = [b[max], b[i]];
+                    for (let j = i + 1; j < n; j++) {
+                        let f = A[j][i] / A[i][i];
+                        b[j] -= f * b[i];
+                        for (let k = i; k < n; k++) A[j][k] -= f * A[i][k];
+                    }
+                }
+                let x = new Array(n);
+                for (let i = n - 1; i >= 0; i--) {
+                    let sum = 0;
+                    for (let j = i + 1; j < n; j++) sum += A[i][j] * x[j];
+                    x[i] = (b[i] - sum) / A[i][i];
+                }
+                return x;
+            };
+            try { return [...solve(A, B), 1]; } catch (e) { return null; }
+        }
+
+        function getAvgColor(d) {
+            let r = 0, g = 0, b = 0, c = 0;
+            for (let i = 0; i < d.data.length; i += 40) {
+                if (d.data[i + 3] > 0) {
+                    r += d.data[i];
+                    g += d.data[i + 1];
+                    b += d.data[i + 2];
+                    c++;
+                }
+            }
+            return { r: r / c | 0, g: g / c | 0, b: b / c | 0 };
+        }
+
+        // ================== 事件绑定 ==================
+        uploadInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    loadImageToDistortion(event.target.result);
+                    showStage(1);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        btnApplyDistortion.addEventListener('click', () => {
+            if (!glTexture) {
+                alert("请先导入图片");
+                return;
+            }
+            renderDistortion();
+            // 将去畸变结果转为图片传递给分割编辑器
+            const distortedDataURL = glCanvas.toDataURL('image/png');
+            initSegmentationEditor(distortedDataURL);
+            showStage(2);
+        });
+
+        btnSaveDistorted.addEventListener('click', () => {
+            if (!glTexture) {
+                alert("请先导入图片");
+                return;
+            }
+            renderDistortion();
+            const dataURL = glCanvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            const timestamp = new Date().toISOString().replace(/[-:.]/g, "");
+            link.download = `distort_fix_${timestamp}.png`;
+            link.href = dataURL;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        btnGenTextures.addEventListener('click', () => {
+            performTextures();
+            // 显示3D预览按钮
+            btnPreview3D.style.display = 'inline-flex';
+        });
+
+        btnPreview3D.addEventListener('click', () => {
+            // 检查是否已生成贴图
+            const resBack = document.getElementById('resBack');
+            if (resBack.width === 0 || resBack.height === 0) {
+                alert("请先点击【生成贴图】按钮");
+                return;
+            }
+            showStage(3);
+            preview3D();
+        });
+
+        // 初始化
+        initWebGL();
+        Object.keys(distortInputs).forEach(key => updateDistortVal(key, distortInputs[key].value));
+        showStage(0);
+    </script>
+
+    <!-- ================== Three.js 3D 模块 ================== -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+        let scene, camera, renderer, controls, roomGroup;
+        let materials = {};
+        let isInitialized = false;
+        const container = document.getElementById('threeContainer');
+
+        window.preview3D = function () {
+            // 等待 DOM 显示后再初始化
+            setTimeout(() => {
+                if (!isInitialized) {
+                    init3D();
+                    isInitialized = true;
+                } else {
+                    // 刷新纹理
+                    refreshTextures();
+                }
+                updateRoom();
+            }, 100);
+        }
+
+        window.update3DParams = function () {
+            document.getElementById('depthVal').innerText = document.getElementById('depthSlider').value;
+            document.getElementById('heightVal').innerText = document.getElementById('heightSlider').value;
+            if (isInitialized) updateRoom();
+        }
+
+        function refreshTextures() {
+            const keys = ['back', 'left', 'right', 'bottom'];
+            keys.forEach(k => {
+                const canvas = document.getElementById('res' + k.charAt(0).toUpperCase() + k.slice(1));
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.minFilter = THREE.LinearFilter;
+                tex.magFilter = THREE.LinearFilter;
+                materials[k].map = tex;
+                materials[k].needsUpdate = true;
+            });
+        }
+
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+
+            // 确保容器有尺寸
+            const width = container.clientWidth || 800;
+            const height = container.clientHeight || 500;
+            const aspect = width / height;
+
+            camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 2000);
+            camera.position.set(0, 50, 400);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            container.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
+            scene.add(ambientLight);
+
+            // 初始化材质
+            const keys = ['back', 'left', 'right', 'bottom'];
+            keys.forEach(k => {
+                const canvas = document.getElementById('res' + k.charAt(0).toUpperCase() + k.slice(1));
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                tex.minFilter = THREE.LinearFilter;
+                tex.magFilter = THREE.LinearFilter;
+                materials[k] = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+            });
+
+            animate();
+
+            // 处理窗口大小变化
+            window.addEventListener('resize', () => {
+                if (container.clientWidth > 0 && container.clientHeight > 0) {
+                    camera.aspect = container.clientWidth / container.clientHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(container.clientWidth, container.clientHeight);
+                }
+            });
+        }
+
+        function createMeshWithUV(width, height, material, flipX, flipY) {
+            const geometry = new THREE.PlaneGeometry(width, height);
+            const uvs = geometry.attributes.uv;
+
+            for (let i = 0; i < uvs.count; i++) {
+                let u = uvs.getX(i);
+                let v = uvs.getY(i);
+                if (flipX) u = 1 - u;
+                if (flipY) v = 1 - v;
+                uvs.setXY(i, u, v);
+            }
+            uvs.needsUpdate = true;
+            return new THREE.Mesh(geometry, material);
+        }
+
+        function updateRoom() {
+            if (roomGroup) scene.remove(roomGroup);
+            roomGroup = new THREE.Group();
+
+            const backW = document.getElementById('resBack').width;
+            const orgBackH = document.getElementById('resBack').height;
+
+            const depthScale = parseFloat(document.getElementById('depthSlider').value);
+            const heightScale = parseFloat(document.getElementById('heightSlider').value);
+
+            const baseDepth = (document.getElementById('resLeft').width + document.getElementById('resRight').width) / 2;
+
+            const w = backW;
+            const h = orgBackH * heightScale;
+            const d = baseDepth * depthScale;
+
+            const getFlip = (prefix) => ({
+                x: document.getElementById(prefix + 'X').checked,
+                y: document.getElementById(prefix + 'Y').checked
+            });
+
+            // 后墙
+            const fBack = getFlip('chkBack');
+            const planeBack = createMeshWithUV(w, h, materials.back, fBack.x, fBack.y);
+            planeBack.position.set(0, 0, -d / 2);
+            roomGroup.add(planeBack);
+
+            // 左墙
+            const fLeft = getFlip('chkLeft');
+            const planeLeft = createMeshWithUV(d, h, materials.left, fLeft.x, fLeft.y);
+            planeLeft.position.set(-w / 2, 0, 0);
+            planeLeft.rotation.y = Math.PI / 2;
+            roomGroup.add(planeLeft);
+
+            // 右墙
+            const fRight = getFlip('chkRight');
+            const planeRight = createMeshWithUV(d, h, materials.right, fRight.x, fRight.y);
+            planeRight.position.set(w / 2, 0, 0);
+            planeRight.rotation.y = -Math.PI / 2;
+            roomGroup.add(planeRight);
+
+            // 地面
+            const fBottom = getFlip('chkBottom');
+            const planeBottom = createMeshWithUV(w, d, materials.bottom, fBottom.x, fBottom.y);
+            planeBottom.position.set(0, -h / 2, 0);
+            planeBottom.rotation.x = -Math.PI / 2;
+            roomGroup.add(planeBottom);
+
+            scene.add(roomGroup);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.exportGLB = function () {
+            const exporter = new GLTFExporter();
+            const options = {
+                binary: true,
+                embedImages: true,
+                maxTextureSize: 4096
+            };
+
+            exporter.parse(roomGroup, (gltf) => {
+                const blob = new Blob([gltf], { type: 'application/octet-stream' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'classroom_3d.glb';
+                link.click();
+            }, (err) => console.error(err), options);
+        }
+
+        // 绑定滑块和复选框事件
+        document.getElementById('heightSlider').addEventListener('input', window.update3DParams);
+        document.getElementById('depthSlider').addEventListener('input', window.update3DParams);
+        ['chkBackX', 'chkBackY', 'chkLeftX', 'chkLeftY', 'chkRightX', 'chkRightY', 'chkBottomX', 'chkBottomY'].forEach(id => {
+            document.getElementById(id).addEventListener('change', window.update3DParams);
+        });
+
+        // GLB 导出按钮
+        document.getElementById('btnExportGLB').addEventListener('click', window.exportGLB);
+    </script>
+
+</body>
+
+</html>

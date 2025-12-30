@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>透视变换</title>
+    <style>
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f4f7f6; display: flex; flex-direction: column; align-items: center; padding: 20px; color: #333; }
+        h2 { margin-bottom: 20px; }
+        .controls { margin-bottom: 25px; display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        button, .btn-label { padding: 10px 24px; font-size: 14px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; justify-content: center; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-primary:hover { background: #0069d9; transform: translateY(-1px); }
+        .btn-success { background: #28a745; color: white; }
+        .btn-success:hover { background: #218838; transform: translateY(-1px); }
+        input[type="file"] { display: none; }
+        
+        .workspace { display: flex; gap: 30px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 1200px; }
+        .canvas-wrapper { display: flex; flex-direction: column; align-items: center; }
+        .canvas-title { margin-bottom: 10px; font-weight: 600; color: #555; }
+        .canvas-container { position: relative; box-shadow: 0 8px 20px rgba(0,0,0,0.1); background: white; border-radius: 8px; overflow: hidden; line-height: 0; user-select: none; touch-action: none; }
+        canvas { display: block; max-width: 100%; height: auto; }
+        
+        /* 拖拽点样式优化 */
+        .handle {
+            width: 24px; height: 24px; /* 加大触控区域 */
+            background: rgba(255, 69, 0, 0.8);
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.8), 0 4px 8px rgba(0,0,0,0.3);
+            border-radius: 50%; position: absolute;
+            transform: translate(-50%, -50%); cursor: grab; z-index: 20;
+            transition: transform 0.1s, background 0.1s;
+        }
+        .handle:hover { transform: translate(-50%, -50%) scale(1.1); background: rgba(255, 69, 0, 1); }
+        .handle:active { cursor: grabbing; transform: translate(-50%, -50%) scale(0.95); background: red; }
+        
+        /* 初始隐藏结果区 */
+        #resultWrapper, #btnDownload { display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>透视变换</h2>
+
+    <div class="controls">
+        <label for="upload" class="btn-label btn-primary">📁 1. 导入图片</label>
+        <input type="file" id="upload" accept="image/*">
+        <button onclick="performTransform()" class="btn-primary">🔄 2. 执行变换</button>
+        <button onclick="downloadResult()" id="btnDownload" class="btn-success">⬇️ 3. 导出结果</button>
+    </div>
+
+    <div class="workspace">
+        <div class="canvas-wrapper">
+            <div class="canvas-title">原图 (拖拽四个角定位)</div>
+            <div class="canvas-container" id="editorContainer">
+                <canvas id="srcCanvas"></canvas>
+                <div class="handle" id="p0"></div> <div class="handle" id="p1"></div> <div class="handle" id="p2"></div> <div class="handle" id="p3"></div> </div>
+        </div>
+
+        <div class="canvas-wrapper" id="resultWrapper">
+            <div class="canvas-title">变换结果</div>
+            <div class="canvas-container">
+                <canvas id="dstCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // --- 核心状态 ---
+    const srcCanvas = document.getElementById('srcCanvas');
+    const dstCanvas = document.getElementById('dstCanvas');
+    const ctxSrc = srcCanvas.getContext('2d', { willReadFrequently: true });
+    const ctxDst = dstCanvas.getContext('2d');
+    const editorContainer = document.getElementById('editorContainer');
+    const handleElements = [
+        document.getElementById('p0'),
+        document.getElementById('p1'),
+        document.getElementById('p2'),
+        document.getElementById('p3')
+    ];
+    
+    let img = new Image();
+    // 存储4个控制点在 Canvas 坐标系中的位置 {x, y}
+    let points = [{x:0, y:0}, {x:0, y:0}, {x:0, y:0}, {x:0, y:0}];
+    let activePointIndex = -1; // 当前正在拖拽的点的索引
+
+    // --- 1. 初始化与图片加载 ---
+    document.getElementById('upload').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => { img.src = event.target.result; };
+        img.onload = () => { initWorkspace(); };
+        reader.readAsDataURL(file);
+    });
+
+    function initWorkspace() {
+        // 设置画布为原图尺寸
+        srcCanvas.width = img.width;
+        srcCanvas.height = img.height;
+        
+        // 初始化4个点的位置：默认在画布角落往内缩进一点
+        const w = srcCanvas.width, h = srcCanvas.height;
+        const padX = w * 0.15, padY = h * 0.15;
+        points[0] = { x: padX, y: padY };             // TL
+        points[1] = { x: w - padX, y: padY };         // TR
+        points[2] = { x: w - padX, y: h - padY };     // BR
+        points[3] = { x: padX, y: h - padY };         // BL
+
+        drawEditor();
+        // 隐藏上一次的结果
+        document.getElementById('resultWrapper').style.display = 'none';
+        document.getElementById('btnDownload').style.display = 'none';
+    }
+
+    // 绘制编辑区域（背景图 + 连线 + 更新点位置）
+    function drawEditor() {
+        ctxSrc.clearRect(0, 0, srcCanvas.width, srcCanvas.height);
+        ctxSrc.drawImage(img, 0, 0);
+        
+        // 绘制连接线
+        ctxSrc.beginPath();
+        ctxSrc.lineWidth = 3;
+        ctxSrc.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+        ctxSrc.moveTo(points[0].x, points[0].y);
+        ctxSrc.lineTo(points[1].x, points[1].y);
+        ctxSrc.lineTo(points[2].x, points[2].y);
+        ctxSrc.lineTo(points[3].x, points[3].y);
+        ctxSrc.closePath();
+        ctxSrc.stroke();
+
+        // 更新 DOM 节点位置
+        points.forEach((p, i) => {
+            // 使用百分比定位以适应 CSS 缩放
+            handleElements[i].style.left = (p.x / srcCanvas.width * 100) + '%';
+            handleElements[i].style.top = (p.y / srcCanvas.height * 100) + '%';
+        });
+    }
+
+    // --- 2. 交互事件处理 (修复了之前的 Bug) ---
+    
+    // 辅助：获取事件在 Canvas 坐标系中的位置
+    function getEventPositionInCanvas(e) {
+        const rect = srcCanvas.getBoundingClientRect();
+        // 兼容鼠标和触摸事件
+        const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
+        
+        // 计算 CSS 显示尺寸与 Canvas 实际分辨率的比率
+        const scaleX = srcCanvas.width / rect.width;
+        const scaleY = srcCanvas.height / rect.height;
+
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+    }
+
+    // 绑定点的按下事件
+    handleElements.forEach((h, index) => {
+        const startDrag = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            activePointIndex = index;
+        };
+        h.addEventListener('mousedown', startDrag);
+        h.addEventListener('touchstart', startDrag, { passive: false });
+    });
+
+    // 全局移动和松开事件
+    const moveHandler = (e) => {
+        if (activePointIndex !== -1) {
+            e.preventDefault(); // 防止滚动
+            const pos = getEventPositionInCanvas(e);
+            // 限制点在画布范围内
+            points[activePointIndex].x = Math.max(0, Math.min(srcCanvas.width, pos.x));
+            points[activePointIndex].y = Math.max(0, Math.min(srcCanvas.height, pos.y));
+            drawEditor();
+        }
+    };
+    const endHandler = () => { activePointIndex = -1; };
+
+    // 将移动事件绑定在 document 上以保证拖出容器也能响应，但限定在 container区域内触发
+    editorContainer.addEventListener('mousemove', moveHandler);
+    editorContainer.addEventListener('touchmove', moveHandler, { passive: false });
+    window.addEventListener('mouseup', endHandler);
+    window.addEventListener('touchend', endHandler);
+
+
+    // --- 3. 核心算法：执行透视变换 ---
+    function performTransform() {
+        if (!img.src) return alert("请先导入图片");
+
+        // 3.1 估算输出矩形的合理宽高
+        // 计算四边形的四条边长
+        const dist = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+        const wTop = dist(points[0], points[1]);
+        const wBottom = dist(points[3], points[2]);
+        const hLeft = dist(points[0], points[3]);
+        const hRight = dist(points[1], points[2]);
+        
+        //取最长边作为输出尺寸，保证清晰度
+        const outW = Math.round(Math.max(wTop, wBottom));
+        const outH = Math.round(Math.max(hLeft, hRight));
+
+        dstCanvas.width = outW;
+        dstCanvas.height = outH;
+
+        // 3.2 获取图像数据
+        const srcImageData = ctxSrc.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+        const dstImageData = ctxDst.createImageData(outW, outH);
+        const srcData = srcImageData.data;
+        const dstData = dstImageData.data;
+        const srcW = srcCanvas.width; srcH = srcCanvas.height;
+
+        // 3.3 计算单应性矩阵 (Homography Matrix)
+        // 我们需要一个矩阵，它能把目标矩形上的点 (u,v) 映射回原图上的点 (x,y)
+        const targetRect = [
+            {x: 0, y: 0},       // TL
+            {x: outW, y: 0},    // TR
+            {x: outW, y: outH}, // BR
+            {x: 0, y: outH}     // BL
+        ];
+        // 计算从 目标(Rect) -> 源(Quad) 的逆向映射矩阵
+        const H = calcHomography(targetRect, points);
+
+        if (!H) return alert("矩阵计算失败，请调整点的位置尝试");
+
+        // 3.4 像素重采样 (反向映射遍历)
+        for (let v = 0; v < outH; v++) {
+            for (let u = 0; u < outW; u++) {
+                // 应用矩阵 H 把目标坐标 (u,v) 映射回源坐标
+                const denom = H[6]*u + H[7]*v + H[8];
+                const x_src = (H[0]*u + H[1]*v + H[2]) / denom;
+                const y_src = (H[3]*u + H[4]*v + H[5]) / denom;
+
+                // 最近邻插值 (Nearest Neighbor) - 简单高效
+                const x = Math.round(x_src);
+                const y = Math.round(y_src);
+
+                // 边界检查，确保在原图范围内
+                if (x >= 0 && x < srcW && y >= 0 && y < srcH) {
+                    const dstIdx = (v * outW + u) * 4;
+                    const srcIdx = (y * srcW + x) * 4;
+                    dstData[dstIdx]     = srcData[srcIdx];     // R
+                    dstData[dstIdx + 1] = srcData[srcIdx + 1]; // G
+                    dstData[dstIdx + 2] = srcData[srcIdx + 2]; // B
+                    dstData[dstIdx + 3] = 255;                 // A (不透明)
+                }
+            }
+        }
+
+        // 3.5 显示结果
+        ctxDst.putImageData(dstImageData, 0, 0);
+        document.getElementById('resultWrapper').style.display = 'flex';
+        document.getElementById('btnDownload').style.display = 'inline-flex';
+    }
+
+    // --- 4. 导出功能 ---
+    function downloadResult() {
+        const link = document.createElement('a');
+        // 使用时间戳生成文件名
+        link.download = `warp_result_${new Date().getTime()}.png`;
+        // toDataURL 在本地环境下通常没问题，跨域图片可能会污染画布导致失败
+        try {
+            link.href = dstCanvas.toDataURL('image/png');
+            link.click();
+        } catch (e) {
+            alert("导出失败，可能是跨域安全限制导致。");
+            console.error(e);
+        }
+    }
+
+
+    // ==========================================
+    // 数学库：计算单应性矩阵 (Homography)
+    // 替换了之前不稳定的实现，采用了更标准的解法。
+    // 这种方法本质上是求解 Ah = 0 的线性方程组，这里使用了简化的代数方法。
+    // ==========================================
+    function calcHomography(src, dst) {
+        // src 是标准矩形的4个点，dst 是任意四边形的4个点
+        let x0 = src[0].x, y0 = src[0].y, u0 = dst[0].x, v0 = dst[0].y;
+        let x1 = src[1].x, y1 = src[1].y, u1 = dst[1].x, v1 = dst[1].y;
+        let x2 = src[2].x, y2 = src[2].y, u2 = dst[2].x, v2 = dst[2].y;
+        let x3 = src[3].x, y3 = src[3].y, u3 = dst[3].x, v3 = dst[3].y;
+
+        // 使用高斯消元法求解 8元线性方程组
+        // Matrix form A * H = B
+        let A = [
+            [x0, y0, 1, 0, 0, 0, -u0*x0, -u0*y0],
+            [0, 0, 0, x0, y0, 1, -v0*x0, -v0*y0],
+            [x1, y1, 1, 0, 0, 0, -u1*x1, -u1*y1],
+            [0, 0, 0, x1, y1, 1, -v1*x1, -v1*y1],
+            [x2, y2, 1, 0, 0, 0, -u2*x2, -u2*y2],
+            [0, 0, 0, x2, y2, 1, -v2*x2, -v2*y2],
+            [x3, y3, 1, 0, 0, 0, -u3*x3, -u3*y3],
+            [0, 0, 0, x3, y3, 1, -v3*x3, -v3*y3]
+        ];
+        let B = [u0, v0, u1, v1, u2, v2, u3, v3];
+
+        // Gaussian elimination with partial pivoting
+        const n = 8;
+        for (let i = 0; i < n; i++) {
+            let maxRow = i;
+            for (let k = i + 1; k < n; k++) {
+                if (Math.abs(A[k][i]) > Math.abs(A[maxRow][i])) {
+                    maxRow = k;
+                }
+            }
+            // Swap rows
+            [A[i], A[maxRow]] = [A[maxRow], A[i]];
+            [B[i], B[maxRow]] = [B[maxRow], B[i]];
+
+            // Make A[i][i] equal to 1
+            let pivot = A[i][i];
+            if (Math.abs(pivot) < 1e-10) return null; // Matrix is singular
+
+            for (let j = i; j < n; j++) A[i][j] /= pivot;
+            B[i] /= pivot;
+
+            // Eliminate other rows
+            for (let k = 0; k < n; k++) {
+                if (k !== i) {
+                    let factor = A[k][i];
+                    for (let j = i; j < n; j++) A[k][j] -= factor * A[i][j];
+                    B[k] -= factor * B[i];
+                }
+            }
+        }
+        
+        // The result H is now in B, append H[8] = 1
+        return [...B, 1];
+    }
+
+</script>
+</body>
+</html>

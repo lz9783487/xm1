@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>视频去畸变 + 3D实时播放</title>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+            }
+        }
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #f0f0f0;
+            margin: 0;
+            min-height: 100vh;
+            padding: 15px;
+        }
+
+        h2 {
+            text-align: center;
+            margin: 10px 0 15px;
+            font-size: 1.3rem;
+        }
+
+        .top-controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+            background: rgba(42, 42, 42, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            backdrop-filter: blur(10px);
+        }
+
+        button,
+        .btn-label {
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-purple {
+            background: #6f42c1;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        /* 视图切换标签 */
+        .view-tabs {
+            display: flex;
+            justify-content: center;
+            gap: 0;
+            margin-bottom: 12px;
+        }
+
+        .view-tab {
+            padding: 10px 30px;
+            background: #333;
+            color: #888;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .view-tab:first-child {
+            border-radius: 8px 0 0 8px;
+        }
+
+        .view-tab:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+
+        .view-tab.active {
+            background: #007bff;
+            color: white;
+        }
+
+        .view-tab:hover:not(.active) {
+            background: #444;
+        }
+
+        .main-container {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        /* 左侧预览区 */
+        .preview-section {
+            flex: 1;
+            min-width: 450px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: visible;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 350px;
+        }
+
+        #displayCanvas,
+        #threeContainer {
+            max-width: 100%;
+            border-radius: 8px;
+        }
+
+        #threeContainer {
+            width: 100%;
+            height: 450px;
+            display: none;
+        }
+
+        #sourceVideo {
+            display: none;
+        }
+
+        .handle {
+            width: 16px;
+            height: 16px;
+            background: rgba(255, 69, 0, 0.9);
+            border: 2px solid white;
+            border-radius: 50%;
+            position: absolute;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            z-index: 20;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+        }
+
+        .handle.front {
+            background: rgba(0, 150, 255, 0.9);
+        }
+
+        /* 播放控制 */
+        .playback-controls {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            background: rgba(30, 30, 30, 0.9);
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .playback-row {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #444;
+            border-radius: 4px;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .progress-bar .progress {
+            height: 100%;
+            background: linear-gradient(90deg, #4fc3f7, #007bff);
+            width: 0%;
+        }
+
+        .time-display {
+            font-size: 12px;
+            color: #aaa;
+            text-align: center;
+        }
+
+        /* 右侧控制面板 */
+        .control-panel {
+            width: 260px;
+            background: rgba(42, 42, 42, 0.9);
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 75vh;
+            overflow-y: auto;
+        }
+
+        .panel-section {
+            background: #333;
+            border-radius: 6px;
+            padding: 10px;
+        }
+
+        .panel-section h3 {
+            margin: 0 0 10px 0;
+            font-size: 13px;
+            color: #4fc3f7;
+            border-bottom: 1px solid #444;
+            padding-bottom: 6px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            margin-bottom: 8px;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-group label {
+            font-size: 11px;
+            color: #aaa;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+        }
+
+        /* 3D 调整面板 */
+        .adjust-panel-3d {
+            display: none;
+            background: rgba(42, 42, 42, 0.9);
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .adjust-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px;
+        }
+
+        .adjust-item {
+            background: #333;
+            padding: 8px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .adjust-item h4 {
+            margin: 0 0 6px 0;
+            font-size: 12px;
+            color: #ccc;
+        }
+
+        .adjust-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .adjust-row input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+        }
+
+        #welcomeMsg {
+            text-align: center;
+            padding: 50px 20px;
+            color: #666;
+        }
+
+        #hiddenCanvases {
+            display: none;
+        }
+
+        .recording-badge {
+            display: none;
+            background: #dc3545;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            animation: pulse 1s infinite;
+        }
+
+        .recording-badge.active {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        @keyframes pulse {
+            50% {
+                opacity: 0.6;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>🎬 视频去畸变 + 3D实时播放</h2>
+
+    <div class="top-controls">
+        <label for="uploadVideo" class="btn-label btn-primary">📂 视频</label>
+        <input type="file" id="uploadVideo" accept="video/*">
+        <label for="uploadImage" class="btn-label btn-primary">🖼️ 图片</label>
+        <input type="file" id="uploadImage" accept="image/*">
+        <button id="btnSaveFrame" class="btn-purple" style="display:none;">💾 保存帧</button>
+        <button id="btnRecord" class="btn-danger" style="display:none;">⏺️ 录制</button>
+        <button id="btnExportGLB" class="btn-success" style="display:none;">📦 导出GLB</button>
+        <span class="recording-badge" id="recordBadge">🔴 录制中</span>
+    </div>
+
+    <div class="view-tabs" id="viewTabs" style="display:none;">
+        <div class="view-tab active" data-view="2d">📐 2D 编辑</div>
+        <div class="view-tab" data-view="3d">🎮 3D 预览</div>
+    </div>
+
+    <div id="welcomeMsg">
+        <p>👋 导入视频或图片开始处理</p>
+        <p>支持 3D 视图中实时播放视频</p>
+    </div>
+
+    <div class="main-container" id="mainContainer" style="display:none;">
+        <div class="preview-section">
+            <div class="canvas-wrapper" id="canvasWrapper">
+                <video id="sourceVideo" playsinline></video>
+                <canvas id="displayCanvas"></canvas>
+                <div id="threeContainer"></div>
+                <div class="handle back" id="p0"></div>
+                <div class="handle back" id="p1"></div>
+                <div class="handle back" id="p2"></div>
+                <div class="handle back" id="p3"></div>
+                <div class="handle front" id="p4"></div>
+                <div class="handle front" id="p5"></div>
+                <div class="handle front" id="p6"></div>
+                <div class="handle front" id="p7"></div>
+            </div>
+
+            <div class="playback-controls" id="playbackControls">
+                <div class="progress-bar" id="progressBar">
+                    <div class="progress" id="progress"></div>
+                </div>
+                <div class="time-display" id="timeDisplay">00:00 / 00:00</div>
+                <div class="playback-row">
+                    <button id="btnPrev" class="btn-info">⏮️</button>
+                    <button id="btnPlay" class="btn-success">▶️ 播放</button>
+                    <button id="btnNext" class="btn-info">⏭️</button>
+                    <button id="btnStop" class="btn-warning">⏹️</button>
+                </div>
+            </div>
+
+            <div class="adjust-panel-3d" id="adjustPanel3D">
+                <div class="adjust-grid">
+                    <div class="adjust-item" style="grid-column: 1/-1;">
+                        <div class="adjust-row">
+                            <label>高度: <span id="heightVal">1.0</span></label>
+                            <input type="range" id="heightSlider" min="0.5" max="3" step="0.1" value="1"
+                                style="width:120px;">
+                        </div>
+                        <div class="adjust-row">
+                            <label>进深: <span id="depthVal">1.0</span></label>
+                            <input type="range" id="depthSlider" min="0.5" max="4" step="0.1" value="1"
+                                style="width:120px;">
+                        </div>
+                    </div>
+                    <div class="adjust-item">
+                        <h4>后墙</h4>
+                        <div class="adjust-row"><span>镜像</span><input type="checkbox" id="chkBackX" checked></div>
+                        <div class="adjust-row"><span>翻转</span><input type="checkbox" id="chkBackY"></div>
+                    </div>
+                    <div class="adjust-item">
+                        <h4>左墙</h4>
+                        <div class="adjust-row"><span>镜像</span><input type="checkbox" id="chkLeftX"></div>
+                        <div class="adjust-row"><span>翻转</span><input type="checkbox" id="chkLeftY"></div>
+                    </div>
+                    <div class="adjust-item">
+                        <h4>右墙</h4>
+                        <div class="adjust-row"><span>镜像</span><input type="checkbox" id="chkRightX" checked></div>
+                        <div class="adjust-row"><span>翻转</span><input type="checkbox" id="chkRightY"></div>
+                    </div>
+                    <div class="adjust-item">
+                        <h4>地面</h4>
+                        <div class="adjust-row"><span>镜像</span><input type="checkbox" id="chkBottomX" checked></div>
+                        <div class="adjust-row"><span>翻转</span><input type="checkbox" id="chkBottomY"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="control-panel">
+            <div class="panel-section">
+                <h3>⬆️⬇️ 垂直弧度</h3>
+                <div class="control-group">
+                    <label>上 <span id="val-top">0.00</span></label>
+                    <input type="range" id="c-top" min="-2" max="2" step="0.01" value="0">
+                </div>
+                <div class="control-group">
+                    <label>下 <span id="val-bottom">0.00</span></label>
+                    <input type="range" id="c-bottom" min="-2" max="2" step="0.01" value="0">
+                </div>
+            </div>
+            <div class="panel-section">
+                <h3>⬅️➡️ 水平弧度</h3>
+                <div class="control-group">
+                    <label>左 <span id="val-left">0.00</span></label>
+                    <input type="range" id="c-left" min="-2" max="2" step="0.01" value="0">
+                </div>
+                <div class="control-group">
+                    <label>右 <span id="val-right">0.00</span></label>
+                    <input type="range" id="c-right" min="-2" max="2" step="0.01" value="0">
+                </div>
+            </div>
+            <div class="panel-section">
+                <h3>🔍 缩放</h3>
+                <div class="control-group">
+                    <label>缩放 <span id="val-scale">1.00</span></label>
+                    <input type="range" id="scale" min="0.5" max="5" step="0.01" value="1">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="hiddenCanvases">
+        <canvas id="glcanvas"></canvas>
+        <canvas id="resBack"></canvas><canvas id="resLeft"></canvas>
+        <canvas id="resRight"></canvas><canvas id="resBottom"></canvas>
+    </div>
+
+    <script id="vs" type="x-shader/x-vertex">
+    attribute vec2 a_position; attribute vec2 a_texCoord; varying vec2 v_texCoord;
+    void main() { gl_Position = vec4(a_position, 0.0, 1.0); v_texCoord = a_texCoord; }
+    </script>
+    <script id="fs" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform sampler2D u_image; uniform float u_top, u_bottom, u_left, u_right, u_scale;
+    varying vec2 v_texCoord;
+    void main() {
+        vec2 st = v_texCoord * 2.0 - 1.0, sc = st / u_scale;
+        float dx2 = sc.x*sc.x, dy2 = sc.y*sc.y;
+        float wy = (sc.y > 0.0) ? u_top : u_bottom, wx = (sc.x > 0.0) ? u_right : u_left;
+        vec2 d = vec2(sc.x*(1.0-wx*dy2), sc.y*(1.0-wy*dx2)), uv = (d+1.0)*0.5;
+        gl_FragColor = (uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0) ? vec4(0,0,0,1) : texture2D(u_image, uv);
+    }
+    </script>
+
+    <script>
+        const glCanvas = document.getElementById('glcanvas');
+        const gl = glCanvas.getContext('webgl', { preserveDrawingBuffer: true });
+        const displayCanvas = document.getElementById('displayCanvas');
+        const displayCtx = displayCanvas.getContext('2d');
+        const video = document.getElementById('sourceVideo');
+        const handles = Array.from({ length: 8 }, (_, i) => document.getElementById('p' + i));
+        const resCvs = {
+            back: document.getElementById('resBack'), left: document.getElementById('resLeft'),
+            right: document.getElementById('resRight'), bottom: document.getElementById('resBottom')
+        };
+
+        let glProgram, glTexture, points = Array(8).fill().map(() => ({ x: 0, y: 0 }));
+        let activeIdx = -1, cW = 0, cH = 0, isVideo = false, isPlaying = false, currentView = '2d';
+        let mediaRecorder = null, chunks = [];
+
+        const distortInputs = {
+            top: document.getElementById('c-top'), bottom: document.getElementById('c-bottom'),
+            left: document.getElementById('c-left'), right: document.getElementById('c-right'), scale: document.getElementById('scale')
+        };
+        const faces = { back: [0, 1, 3, 2], left: [4, 0, 2, 6], right: [1, 5, 7, 3], bottom: [2, 3, 7, 6] };
+
+        // WebGL
+        function initGL() {
+            const vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, document.getElementById('vs').text); gl.compileShader(vs);
+            const fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, document.getElementById('fs').text); gl.compileShader(fs);
+            glProgram = gl.createProgram(); gl.attachShader(glProgram, vs); gl.attachShader(glProgram, fs); gl.linkProgram(glProgram); gl.useProgram(glProgram);
+            const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1]), gl.STATIC_DRAW);
+            const aP = gl.getAttribLocation(glProgram, 'a_position'), aT = gl.getAttribLocation(glProgram, 'a_texCoord');
+            gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aT); gl.vertexAttribPointer(aT, 2, gl.FLOAT, false, 16, 8);
+        }
+
+        function render2D() {
+            if (!glTexture) return;
+            gl.bindTexture(gl.TEXTURE_2D, glTexture);
+            if (isVideo && !video.paused) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+            gl.uniform1f(gl.getUniformLocation(glProgram, 'u_top'), +distortInputs.top.value);
+            gl.uniform1f(gl.getUniformLocation(glProgram, 'u_bottom'), +distortInputs.bottom.value);
+            gl.uniform1f(gl.getUniformLocation(glProgram, 'u_left'), +distortInputs.left.value);
+            gl.uniform1f(gl.getUniformLocation(glProgram, 'u_right'), +distortInputs.right.value);
+            gl.uniform1f(gl.getUniformLocation(glProgram, 'u_scale'), +distortInputs.scale.value);
+            gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            displayCtx.drawImage(glCanvas, 0, 0, cW, cH);
+            // 连线
+            displayCtx.strokeStyle = 'cyan'; displayCtx.lineWidth = 2; displayCtx.beginPath();
+            [[0, 1], [1, 3], [3, 2], [2, 0], [0, 4], [1, 5], [2, 6], [3, 7], [4, 6], [5, 7], [6, 7]].forEach(([a, b]) => {
+                displayCtx.moveTo(points[a].x, points[a].y); displayCtx.lineTo(points[b].x, points[b].y);
+            });
+            displayCtx.stroke();
+            updateHandles();
+        }
+
+        function updateHandles() {
+            const r = displayCanvas.getBoundingClientRect(), sx = r.width / cW, sy = r.height / cH;
+            const ox = displayCanvas.offsetLeft, oy = displayCanvas.offsetTop;
+            points.forEach((p, i) => { handles[i].style.left = (ox + p.x * sx) + 'px'; handles[i].style.top = (oy + p.y * sy) + 'px'; });
+        }
+
+        function setupCanvas(w, h) {
+            const mw = Math.min(750, innerWidth * 0.55), mh = innerHeight * 0.55;
+            if (w > mw || h > mh) { const r = Math.min(mw / w, mh / h); w *= r; h *= r; }
+            cW = w; cH = h;
+            glCanvas.width = w; glCanvas.height = h; gl.viewport(0, 0, w, h);
+            displayCanvas.width = w; displayCanvas.height = h;
+            const cx = w / 2, cy = h / 2;
+            points = [
+                { x: cx - w * 0.2, y: cy - h * 0.2 }, { x: cx + w * 0.2, y: cy - h * 0.2 }, { x: cx - w * 0.2, y: cy + h * 0.2 }, { x: cx + w * 0.2, y: cy + h * 0.2 },
+                { x: cx - w * 0.4, y: cy - h * 0.4 }, { x: cx + w * 0.4, y: cy - h * 0.4 }, { x: cx - w * 0.4, y: cy + h * 0.4 }, { x: cx + w * 0.4, y: cy + h * 0.4 }
+            ];
+        }
+
+        function createTex(src) {
+            if (glTexture) gl.deleteTexture(glTexture);
+            glTexture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, glTexture);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+        }
+
+        function loadImg(src) {
+            const img = new Image(); img.crossOrigin = 'anonymous';
+            img.onload = () => { isVideo = false; setupCanvas(img.width, img.height); createTex(img); resetSliders(); showUI(false); render2D(); };
+            img.src = src;
+        }
+        function loadVid(src) {
+            video.src = src;
+            video.onloadedmetadata = () => { isVideo = true; setupCanvas(video.videoWidth, video.videoHeight); };
+            video.oncanplay = () => { createTex(video); resetSliders(); showUI(true); render2D(); };
+        }
+        function resetSliders() {
+            Object.values(distortInputs).forEach(i => { i.value = i.id === 'scale' ? 1 : 0; updateVal(i.id.replace('c-', ''), i.value); });
+        }
+        function showUI(isVid) {
+            document.getElementById('welcomeMsg').style.display = 'none';
+            document.getElementById('mainContainer').style.display = 'flex';
+            document.getElementById('viewTabs').style.display = 'flex';
+            document.getElementById('playbackControls').style.display = isVid ? 'flex' : 'none';
+            document.getElementById('btnSaveFrame').style.display = 'inline-flex';
+            document.getElementById('btnRecord').style.display = isVid ? 'inline-flex' : 'none';
+            document.getElementById('btnExportGLB').style.display = 'inline-flex';
+        }
+        function updateVal(id, v) { const e = document.getElementById('val-' + id); if (e) e.innerText = (+v).toFixed(2); }
+
+        // 视图切换
+        document.querySelectorAll('.view-tab').forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentView = tab.dataset.view;
+                const is3D = currentView === '3d';
+                displayCanvas.style.display = is3D ? 'none' : 'block';
+                document.getElementById('threeContainer').style.display = is3D ? 'block' : 'none';
+                handles.forEach(h => h.style.display = is3D ? 'none' : 'block');
+                document.getElementById('adjustPanel3D').style.display = is3D ? 'block' : 'none';
+                if (is3D) { genTextures(); window.init3DIfNeeded(); }
+            };
+        });
+
+        // 播放控制
+        function loop() {
+            if (currentView === '2d') render2D();
+            else if (window.update3DFrame) window.update3DFrame();
+            updateProg();
+            if (isPlaying) requestAnimationFrame(loop);
+        }
+        function togglePlay() {
+            if (video.paused) { video.play(); isPlaying = true; document.getElementById('btnPlay').textContent = '⏸️'; loop(); }
+            else { video.pause(); isPlaying = false; document.getElementById('btnPlay').textContent = '▶️'; }
+        }
+        function stopVid() { video.pause(); video.currentTime = 0; isPlaying = false; document.getElementById('btnPlay').textContent = '▶️'; render2D(); updateProg(); }
+        function stepFrame(d) {
+            video.pause(); isPlaying = false; document.getElementById('btnPlay').textContent = '▶️';
+            video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + d / 30));
+            setTimeout(() => { createTex(video); render2D(); updateProg(); }, 50);
+        }
+        function updateProg() {
+            const p = (video.currentTime / video.duration) * 100 || 0;
+            document.getElementById('progress').style.width = p + '%';
+            const fmt = t => `${Math.floor(t / 60).toString().padStart(2, '0')}:${Math.floor(t % 60).toString().padStart(2, '0')}`;
+            document.getElementById('timeDisplay').textContent = `${fmt(video.currentTime)} / ${fmt(video.duration || 0)}`;
+        }
+        document.getElementById('progressBar').onclick = e => {
+            const r = e.target.getBoundingClientRect(), p = (e.clientX - r.left) / r.width;
+            video.currentTime = p * video.duration;
+            setTimeout(() => { createTex(video); render2D(); updateProg(); }, 50);
+        };
+        document.getElementById('btnPlay').onclick = togglePlay;
+        document.getElementById('btnStop').onclick = stopVid;
+        document.getElementById('btnPrev').onclick = () => stepFrame(-1);
+        document.getElementById('btnNext').onclick = () => stepFrame(1);
+
+        // 录制
+        document.getElementById('btnRecord').onclick = () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop(); video.pause(); isPlaying = false;
+            } else {
+                chunks = [];
+                const cvs = currentView === '3d' ? document.querySelector('#threeContainer canvas') : displayCanvas;
+                const stream = cvs.captureStream(30);
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' }), a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob); a.download = `output_${Date.now()}.webm`; a.click();
+                    document.getElementById('recordBadge').classList.remove('active');
+                    document.getElementById('btnRecord').textContent = '⏺️ 录制';
+                };
+                mediaRecorder.start();
+                document.getElementById('recordBadge').classList.add('active');
+                document.getElementById('btnRecord').textContent = '⏹️ 停止';
+                video.currentTime = 0; video.play(); isPlaying = true; document.getElementById('btnPlay').textContent = '⏸️'; loop();
+                video.onended = () => { if (mediaRecorder.state === 'recording') mediaRecorder.stop(); isPlaying = false; };
+            }
+        };
+
+        // 控制点拖动
+        handles.forEach((h, i) => { h.onmousedown = e => { e.preventDefault(); activeIdx = i; }; h.ontouchstart = e => { e.preventDefault(); activeIdx = i; }; });
+        const onMove = e => {
+            if (activeIdx < 0) return; e.preventDefault();
+            const r = displayCanvas.getBoundingClientRect();
+            const x = (e.touches ? e.touches[0].clientX : e.clientX), y = (e.touches ? e.touches[0].clientY : e.clientY);
+            points[activeIdx].x = Math.max(0, Math.min(cW, (x - r.left) * (cW / r.width)));
+            points[activeIdx].y = Math.max(0, Math.min(cH, (y - r.top) * (cH / r.height)));
+            render2D();
+        };
+        addEventListener('mousemove', onMove); addEventListener('touchmove', onMove, { passive: false });
+        addEventListener('mouseup', () => activeIdx = -1); addEventListener('touchend', () => activeIdx = -1);
+
+        // 滑块
+        Object.keys(distortInputs).forEach(k => {
+            distortInputs[k].oninput = e => { updateVal(k, e.target.value); render2D(); };
+        });
+
+        // 贴图生成
+        function genTextures() {
+            const iD = displayCtx.getImageData(0, 0, cW, cH), avg = getAvg(iD);
+            for (let k in faces) warpFace(faces[k], resCvs[k], iD, avg);
+        }
+        function warpFace(idx, cvs, srcD, fill) {
+            const ps = idx.map(i => points[i]), dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+            const w = Math.max(dist(ps[0], ps[1]), dist(ps[2], ps[3])) | 0, h = Math.max(dist(ps[0], ps[3]), dist(ps[1], ps[2])) | 0;
+            if (w < 1 || h < 1) return;
+            cvs.width = w; cvs.height = h;
+            const ctx = cvs.getContext('2d'), dD = ctx.createImageData(w, h), H = calcH(w, h, ps);
+            if (!H) return;
+            for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+                const z = H[6] * x + H[7] * y + H[8], u = (H[0] * x + H[1] * y + H[2]) / z, v = (H[3] * x + H[4] * y + H[5]) / z;
+                const si = ((v | 0) * cW + (u | 0)) * 4, di = (y * w + x) * 4;
+                if (u >= 0 && u < cW && v >= 0 && v < cH) dD.data.set(srcD.data.subarray(si, si + 4), di);
+                else dD.data.set([fill.r, fill.g, fill.b, 255], di);
+            }
+            ctx.putImageData(dD, 0, 0);
+        }
+        function calcH(w, h, p) {
+            let sx = [p[0].x, p[1].x, p[2].x, p[3].x], sy = [p[0].y, p[1].y, p[2].y, p[3].y], dx = [0, w, w, 0], dy = [0, 0, h, h], A = [], B = [];
+            for (let i = 0; i < 4; i++) { A.push([dx[i], dy[i], 1, 0, 0, 0, -sx[i] * dx[i], -sx[i] * dy[i]]); A.push([0, 0, 0, dx[i], dy[i], 1, -sy[i] * dx[i], -sy[i] * dy[i]]); B.push(sx[i]); B.push(sy[i]); }
+            try { let n = 8; for (let i = 0; i < n; i++) { let m = i; for (let k = i + 1; k < n; k++)if (Math.abs(A[k][i]) > Math.abs(A[m][i])) m = k;[A[i], A[m]] = [A[m], A[i]];[B[i], B[m]] = [B[m], B[i]]; for (let j = i + 1; j < n; j++) { let f = A[j][i] / A[i][i]; B[j] -= f * B[i]; for (let k = i; k < n; k++)A[j][k] -= f * A[i][k]; } } let x = Array(n); for (let i = n - 1; i >= 0; i--) { let s = 0; for (let j = i + 1; j < n; j++)s += A[i][j] * x[j]; x[i] = (B[i] - s) / A[i][i]; } return [...x, 1]; } catch (e) { return null; }
+        }
+        function getAvg(d) { let r = 0, g = 0, b = 0, c = 0; for (let i = 0; i < d.data.length; i += 40)if (d.data[i + 3] > 0) { r += d.data[i]; g += d.data[i + 1]; b += d.data[i + 2]; c++; } return { r: r / c | 0, g: g / c | 0, b: b / c | 0 }; }
+
+        document.getElementById('uploadVideo').onchange = e => { if (e.target.files[0]) loadVid(URL.createObjectURL(e.target.files[0])); };
+        document.getElementById('uploadImage').onchange = e => { if (e.target.files[0]) { const r = new FileReader(); r.onload = ev => loadImg(ev.target.result); r.readAsDataURL(e.target.files[0]); } };
+        document.getElementById('btnSaveFrame').onclick = () => { const a = document.createElement('a'); a.download = `frame_${Date.now()}.png`; a.href = displayCanvas.toDataURL(); a.click(); };
+
+        initGL();
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+        let scene, camera, renderer, controls, roomGroup, mats = {}, textures = {}, init = false;
+        const container = document.getElementById('threeContainer');
+        const video = document.getElementById('sourceVideo');
+        const glCanvas = document.getElementById('glcanvas');
+        const gl = glCanvas.getContext('webgl', { preserveDrawingBuffer: true });
+
+        window.init3DIfNeeded = () => { if (!init) { init3D(); init = true; } updateRoom(); };
+
+        // 实时更新3D纹理
+        window.update3DFrame = () => {
+            if (!init) return;
+            // 重新渲染 WebGL 去畸变
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            // 更新显示canvas
+            const displayCanvas = document.getElementById('displayCanvas');
+            const displayCtx = displayCanvas.getContext('2d');
+            displayCtx.drawImage(glCanvas, 0, 0, displayCanvas.width, displayCanvas.height);
+            // 重新生成贴图
+            window.genTextures && window.genTextures();
+            // 更新Three.js纹理
+            ['back', 'left', 'right', 'bottom'].forEach(k => {
+                const cvs = document.getElementById('res' + k.charAt(0).toUpperCase() + k.slice(1));
+                if (textures[k]) {
+                    textures[k].image = cvs;
+                    textures[k].needsUpdate = true;
+                }
+            });
+        };
+        // 暴露给普通脚本
+        window.genTextures = () => {
+            const displayCanvas = document.getElementById('displayCanvas');
+            const displayCtx = displayCanvas.getContext('2d');
+            const cW = displayCanvas.width, cH = displayCanvas.height;
+            const iD = displayCtx.getImageData(0, 0, cW, cH);
+            const faces = { back: [0, 1, 3, 2], left: [4, 0, 2, 6], right: [1, 5, 7, 3], bottom: [2, 3, 7, 6] };
+            const pts = window.points || [];
+            const avg = (() => { let r = 0, g = 0, b = 0, c = 0; for (let i = 0; i < iD.data.length; i += 40) if (iD.data[i + 3] > 0) { r += iD.data[i]; g += iD.data[i + 1]; b += iD.data[i + 2]; c++; } return { r: r / c | 0, g: g / c | 0, b: b / c | 0 }; })();
+            for (let k in faces) {
+                const idx = faces[k], ps = idx.map(i => pts[i] || { x: 0, y: 0 });
+                const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+                const w = Math.max(dist(ps[0], ps[1]), dist(ps[2], ps[3])) | 0, h = Math.max(dist(ps[0], ps[3]), dist(ps[1], ps[2])) | 0;
+                if (w < 1 || h < 1) continue;
+                const cvs = document.getElementById('res' + k.charAt(0).toUpperCase() + k.slice(1));
+                cvs.width = w; cvs.height = h;
+                const ctx = cvs.getContext('2d'), dD = ctx.createImageData(w, h);
+                // calcH inline
+                let sx = [ps[0].x, ps[1].x, ps[2].x, ps[3].x], sy = [ps[0].y, ps[1].y, ps[2].y, ps[3].y], dx = [0, w, w, 0], dy = [0, 0, h, h], A = [], B = [];
+                for (let i = 0; i < 4; i++) { A.push([dx[i], dy[i], 1, 0, 0, 0, -sx[i] * dx[i], -sx[i] * dy[i]]); A.push([0, 0, 0, dx[i], dy[i], 1, -sy[i] * dx[i], -sy[i] * dy[i]]); B.push(sx[i]); B.push(sy[i]); }
+                let H = null;
+                try { let n = 8; for (let i = 0; i < n; i++) { let m = i; for (let k = i + 1; k < n; k++)if (Math.abs(A[k][i]) > Math.abs(A[m][i])) m = k;[A[i], A[m]] = [A[m], A[i]];[B[i], B[m]] = [B[m], B[i]]; for (let j = i + 1; j < n; j++) { let f = A[j][i] / A[i][i]; B[j] -= f * B[i]; for (let k = i; k < n; k++)A[j][k] -= f * A[i][k]; } } let x = Array(n); for (let i = n - 1; i >= 0; i--) { let s = 0; for (let j = i + 1; j < n; j++)s += A[i][j] * x[j]; x[i] = (B[i] - s) / A[i][i]; } H = [...x, 1]; } catch (e) { }
+                if (!H) continue;
+                for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+                    const z = H[6] * x + H[7] * y + H[8], u = (H[0] * x + H[1] * y + H[2]) / z, v = (H[3] * x + H[4] * y + H[5]) / z;
+                    const si = ((v | 0) * cW + (u | 0)) * 4, di = (y * w + x) * 4;
+                    if (u >= 0 && u < cW && v >= 0 && v < cH) dD.data.set(iD.data.subarray(si, si + 4), di);
+                    else dD.data.set([avg.r, avg.g, avg.b, 255], di);
+                }
+                ctx.putImageData(dD, 0, 0);
+            }
+        };
+        // 暴露 points
+        Object.defineProperty(window, 'points', {
+            get: () => {
+                try { return eval('points'); } catch (e) { return []; }
+            }
+        });
+
+        function init3D() {
+            scene = new THREE.Scene(); scene.background = new THREE.Color(0x1a1a2e);
+            const w = container.clientWidth || 700, h = container.clientHeight || 400;
+            camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 2000);
+            camera.position.set(0, 50, 350);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(w, h);
+            container.appendChild(renderer.domElement);
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            scene.add(new THREE.AmbientLight(0xffffff, 2));
+
+            ['back', 'left', 'right', 'bottom'].forEach(k => {
+                const cvs = document.getElementById('res' + k.charAt(0).toUpperCase() + k.slice(1));
+                const tex = new THREE.CanvasTexture(cvs);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                textures[k] = tex;
+                mats[k] = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+            });
+
+            (function anim() { requestAnimationFrame(anim); controls.update(); renderer.render(scene, camera); })();
+        }
+
+        function createMesh(w, h, mat, fx, fy) {
+            const g = new THREE.PlaneGeometry(w, h), uv = g.attributes.uv;
+            for (let i = 0; i < uv.count; i++) { let u = uv.getX(i), v = uv.getY(i); if (fx) u = 1 - u; if (fy) v = 1 - v; uv.setXY(i, u, v); }
+            uv.needsUpdate = true;
+            return new THREE.Mesh(g, mat);
+        }
+
+        function updateRoom() {
+            if (roomGroup) scene.remove(roomGroup);
+            roomGroup = new THREE.Group();
+            const bw = document.getElementById('resBack').width || 100, bh = document.getElementById('resBack').height || 100;
+            const lw = document.getElementById('resLeft').width || 100, rw = document.getElementById('resRight').width || 100;
+            const hs = +document.getElementById('heightSlider').value, ds = +document.getElementById('depthSlider').value;
+            const w = bw, h = bh * hs, d = ((lw + rw) / 2) * ds;
+            const flip = p => ({ x: document.getElementById(p + 'X').checked, y: document.getElementById(p + 'Y').checked });
+
+            const back = createMesh(w, h, mats.back, flip('chkBack').x, flip('chkBack').y); back.position.set(0, 0, -d / 2); roomGroup.add(back);
+            const left = createMesh(d, h, mats.left, flip('chkLeft').x, flip('chkLeft').y); left.position.set(-w / 2, 0, 0); left.rotation.y = Math.PI / 2; roomGroup.add(left);
+            const right = createMesh(d, h, mats.right, flip('chkRight').x, flip('chkRight').y); right.position.set(w / 2, 0, 0); right.rotation.y = -Math.PI / 2; roomGroup.add(right);
+            const bottom = createMesh(w, d, mats.bottom, flip('chkBottom').x, flip('chkBottom').y); bottom.position.set(0, -h / 2, 0); bottom.rotation.x = -Math.PI / 2; roomGroup.add(bottom);
+            scene.add(roomGroup);
+        }
+        window.update3DParams = () => {
+            document.getElementById('heightVal').innerText = document.getElementById('heightSlider').value;
+            document.getElementById('depthVal').innerText = document.getElementById('depthSlider').value;
+            if (init) updateRoom();
+        };
+        ['heightSlider', 'depthSlider'].forEach(id => document.getElementById(id).oninput = window.update3DParams);
+        ['chkBackX', 'chkBackY', 'chkLeftX', 'chkLeftY', 'chkRightX', 'chkRightY', 'chkBottomX', 'chkBottomY'].forEach(id => document.getElementById(id).onchange = window.update3DParams);
+
+        document.getElementById('btnExportGLB').onclick = () => {
+            new GLTFExporter().parse(roomGroup, gltf => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([gltf], { type: 'application/octet-stream' }));
+                a.download = 'room_3d.glb'; a.click();
+            }, e => console.error(e), { binary: true, embedImages: true });
+        };
+    </script>
+</body>
+
+</html>

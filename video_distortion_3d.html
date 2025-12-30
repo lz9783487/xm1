@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>视频去畸变 + 分割 (统一界面)</title>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+            }
+        }
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a1a;
+            color: #f0f0f0;
+            margin: 0;
+            min-height: 100vh;
+            padding: 15px;
+        }
+
+        h2 {
+            text-align: center;
+            margin: 10px 0 20px;
+            font-size: 1.4rem;
+        }
+
+        .top-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            background: #2a2a2a;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        button,
+        .btn-label {
+            padding: 10px 18px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0069d9;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-purple {
+            background: #6f42c1;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .workspace {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .editor-section {
+            flex: 1;
+            min-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .editor-container {
+            position: relative;
+            background: #000;
+            background-image: linear-gradient(45deg, #222 25%, transparent 25%), linear-gradient(-45deg, #222 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #222 75%), linear-gradient(-45deg, transparent 75%, #222 75%);
+            background-size: 20px 20px;
+            border-radius: 8px;
+            overflow: visible;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 400px;
+        }
+
+        #displayCanvas {
+            max-width: 100%;
+            max-height: 65vh;
+        }
+
+        #sourceVideo {
+            display: none;
+        }
+
+        .handle {
+            width: 18px;
+            height: 18px;
+            background: rgba(255, 69, 0, 0.9);
+            border: 2px solid white;
+            border-radius: 50%;
+            position: absolute;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            z-index: 20;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        }
+
+        .handle:hover {
+            transform: translate(-50%, -50%) scale(1.2);
+        }
+
+        .handle.front {
+            background: rgba(0, 150, 255, 0.9);
+        }
+
+        .control-panel {
+            width: 280px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .panel-section {
+            background: #333;
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .panel-section h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            color: #4fc3f7;
+            border-bottom: 1px solid #444;
+            padding-bottom: 8px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 10px;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-group label {
+            font-size: 12px;
+            color: #aaa;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .video-controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 10px;
+            background: #252525;
+            border-radius: 6px;
+        }
+
+        .video-controls button {
+            padding: 8px 14px;
+            font-size: 13px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #444;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 8px;
+            cursor: pointer;
+        }
+
+        .progress-bar .progress {
+            height: 100%;
+            background: #4fc3f7;
+            width: 0%;
+            transition: width 0.1s;
+        }
+
+        .time-display {
+            font-size: 12px;
+            color: #888;
+            text-align: center;
+            margin-top: 5px;
+        }
+
+        .hint {
+            font-size: 11px;
+            color: #888;
+            text-align: center;
+            padding: 8px;
+            background: #252525;
+            border-radius: 4px;
+        }
+
+        /* 3D 预览区 */
+        #stage-3d {
+            display: none;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .adjust-panel {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+        }
+
+        .adjust-group {
+            background: #333;
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .adjust-group h4 {
+            margin: 0 0 8px 0;
+            font-size: 13px;
+            color: #ccc;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        .control-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+        }
+
+        .slider-row {
+            grid-column: 1 / -1;
+            background: #333;
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .slider-row label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 13px;
+            color: #ccc;
+        }
+
+        #threeContainer {
+            width: 100%;
+            height: 500px;
+            background: #222;
+            border-radius: 8px;
+            position: relative;
+        }
+
+        #threeContainer::after {
+            content: '左键旋转 | 右键平移 | 滚轮缩放';
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 11px;
+        }
+
+        #hiddenCanvases {
+            display: none;
+        }
+
+        #welcomeMsg {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .recording-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #dc3545;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .recording-indicator.active {
+            display: inline-flex;
+        }
+
+        .recording-dot {
+            width: 10px;
+            height: 10px;
+            background: white;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0.3;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>🎬 视频去畸变 + 分割</h2>
+
+    <div class="top-controls">
+        <label for="uploadVideo" class="btn-label btn-primary">📂 导入视频</label>
+        <input type="file" id="uploadVideo" accept="video/*">
+        <label for="uploadImage" class="btn-label btn-primary">🖼️ 导入图片</label>
+        <input type="file" id="uploadImage" accept="image/*">
+        <button id="btnPreview3D" class="btn-warning" style="display:none;">🎮 3D 预览 (当前帧)</button>
+        <button id="btnExportGLB" class="btn-success" style="display:none;">📦 导出 GLB</button>
+        <button id="btnSaveFrame" class="btn-purple" style="display:none;">💾 保存当前帧</button>
+        <button id="btnRecordVideo" class="btn-danger" style="display:none;">⏺️ 录制处理后视频</button>
+        <div class="recording-indicator" id="recordingIndicator">
+            <div class="recording-dot"></div>
+            <span>录制中...</span>
+        </div>
+    </div>
+
+    <div id="welcomeMsg">
+        <p>👋 请点击 <strong>导入视频</strong> 或 <strong>导入图片</strong> 开始</p>
+        <p>支持视频实时去畸变预览和参数调整</p>
+    </div>
+
+    <div class="workspace" id="mainWorkspace" style="display:none;">
+        <div class="editor-section">
+            <div class="editor-container" id="editorContainer">
+                <video id="sourceVideo" playsinline></video>
+                <canvas id="displayCanvas"></canvas>
+                <div class="handle back" id="p0"></div>
+                <div class="handle back" id="p1"></div>
+                <div class="handle back" id="p2"></div>
+                <div class="handle back" id="p3"></div>
+                <div class="handle front" id="p4"></div>
+                <div class="handle front" id="p5"></div>
+                <div class="handle front" id="p6"></div>
+                <div class="handle front" id="p7"></div>
+            </div>
+
+            <div class="video-controls" id="videoControls" style="display:none;">
+                <button id="btnPlayPause" class="btn-primary">▶️ 播放</button>
+                <button id="btnStop" class="btn-primary">⏹️ 停止</button>
+                <button id="btnPrevFrame" class="btn-primary">⏮️</button>
+                <button id="btnNextFrame" class="btn-primary">⏭️</button>
+            </div>
+
+            <div id="progressSection" style="display:none;">
+                <div class="progress-bar" id="progressBar">
+                    <div class="progress" id="progress"></div>
+                </div>
+                <div class="time-display" id="timeDisplay">00:00 / 00:00</div>
+            </div>
+
+            <div class="hint">🎯 橙色 = 后墙边界 | 蓝色 = 前景边界 | 拖动控制点调整分割区域</div>
+        </div>
+
+        <div class="control-panel">
+            <div class="panel-section">
+                <h3>⬆️⬇️ 垂直弧度</h3>
+                <div class="control-group">
+                    <label>上边 (Top) <span id="val-top">0.00</span></label>
+                    <input type="range" id="c-top" min="-2.0" max="2.0" step="0.01" value="0.0">
+                </div>
+                <div class="control-group">
+                    <label>下边 (Bottom) <span id="val-bottom">0.00</span></label>
+                    <input type="range" id="c-bottom" min="-2.0" max="2.0" step="0.01" value="0.0">
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>⬅️➡️ 水平弧度</h3>
+                <div class="control-group">
+                    <label>左边 (Left) <span id="val-left">0.00</span></label>
+                    <input type="range" id="c-left" min="-2.0" max="2.0" step="0.01" value="0.0">
+                </div>
+                <div class="control-group">
+                    <label>右边 (Right) <span id="val-right">0.00</span></label>
+                    <input type="range" id="c-right" min="-2.0" max="2.0" step="0.01" value="0.0">
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>🔍 缩放</h3>
+                <div class="control-group">
+                    <label>全局缩放 <span id="val-scale">1.00</span></label>
+                    <input type="range" id="scale" min="0.5" max="5.0" step="0.01" value="1.0">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D 预览区 -->
+    <div id="stage-3d">
+        <div class="adjust-panel">
+            <div class="slider-row">
+                <label>📏 高度比例: <span id="heightVal">1.0</span></label>
+                <input type="range" id="heightSlider" min="0.5" max="3.0" step="0.1" value="1.0">
+            </div>
+            <div class="slider-row">
+                <label>📐 进深比例: <span id="depthVal">1.0</span></label>
+                <input type="range" id="depthSlider" min="0.5" max="4.0" step="0.1" value="1.0">
+            </div>
+            <div class="adjust-group">
+                <h4>后面</h4>
+                <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkBackX" checked></div>
+                <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkBackY"></div>
+            </div>
+            <div class="adjust-group">
+                <h4>左面</h4>
+                <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkLeftX"></div>
+                <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkLeftY"></div>
+            </div>
+            <div class="adjust-group">
+                <h4>右面</h4>
+                <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkRightX" checked></div>
+                <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkRightY"></div>
+            </div>
+            <div class="adjust-group">
+                <h4>地面</h4>
+                <div class="control-row"><label>左右镜像</label><input type="checkbox" id="chkBottomX" checked></div>
+                <div class="control-row"><label>上下颠倒</label><input type="checkbox" id="chkBottomY"></div>
+            </div>
+        </div>
+        <div id="threeContainer"></div>
+    </div>
+
+    <div id="hiddenCanvases">
+        <canvas id="glcanvas"></canvas>
+        <canvas id="resBack"></canvas>
+        <canvas id="resLeft"></canvas>
+        <canvas id="resRight"></canvas>
+        <canvas id="resBottom"></canvas>
+    </div>
+
+    <!-- WebGL Shaders -->
+    <script id="vs" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    attribute vec2 a_texCoord;
+    varying vec2 v_texCoord;
+    void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_texCoord = a_texCoord;
+    }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform sampler2D u_image;
+    uniform float u_top, u_bottom, u_left, u_right, u_scale;
+    varying vec2 v_texCoord;
+
+    void main() {
+        vec2 st = v_texCoord * 2.0 - 1.0;
+        vec2 scaledST = st / u_scale;
+        float dx2 = scaledST.x * scaledST.x;
+        float dy2 = scaledST.y * scaledST.y;
+        float warpY = (scaledST.y > 0.0) ? u_top : u_bottom;
+        float warpX = (scaledST.x > 0.0) ? u_right : u_left;
+        vec2 distorted = vec2(scaledST.x * (1.0 - warpX * dy2), scaledST.y * (1.0 - warpY * dx2));
+        vec2 uv = (distorted + 1.0) * 0.5;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        } else {
+            gl_FragColor = texture2D(u_image, uv);
+        }
+    }
+    </script>
+
+    <script>
+        // ========== 全局变量 ==========
+        const glCanvas = document.getElementById('glcanvas');
+        const gl = glCanvas.getContext('webgl', { preserveDrawingBuffer: true });
+        const displayCanvas = document.getElementById('displayCanvas');
+        const displayCtx = displayCanvas.getContext('2d');
+        const sourceVideo = document.getElementById('sourceVideo');
+        const handles = Array.from({ length: 8 }, (_, i) => document.getElementById(`p${i}`));
+        const resCanvases = {
+            back: document.getElementById('resBack'),
+            left: document.getElementById('resLeft'),
+            right: document.getElementById('resRight'),
+            bottom: document.getElementById('resBottom')
+        };
+
+        let glProgram, glTexture;
+        let points = Array(8).fill().map(() => ({ x: 0, y: 0 }));
+        let activeIdx = -1;
+        let canvasW = 0, canvasH = 0;
+        let isVideo = false;
+        let isPlaying = false;
+        let animationId = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+
+        const distortInputs = {
+            top: document.getElementById('c-top'),
+            bottom: document.getElementById('c-bottom'),
+            left: document.getElementById('c-left'),
+            right: document.getElementById('c-right'),
+            scale: document.getElementById('scale')
+        };
+
+        const faces = { back: [0, 1, 3, 2], left: [4, 0, 2, 6], right: [1, 5, 7, 3], bottom: [2, 3, 7, 6] };
+
+        // ========== WebGL 初始化 ==========
+        function createShader(type, source) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, source);
+            gl.compileShader(s);
+            return s;
+        }
+
+        function initWebGL() {
+            const vs = createShader(gl.VERTEX_SHADER, document.getElementById('vs').text);
+            const fs = createShader(gl.FRAGMENT_SHADER, document.getElementById('fs').text);
+            glProgram = gl.createProgram();
+            gl.attachShader(glProgram, vs);
+            gl.attachShader(glProgram, fs);
+            gl.linkProgram(glProgram);
+            gl.useProgram(glProgram);
+
+            const vertices = new Float32Array([-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1]);
+            const buf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+            const aPos = gl.getAttribLocation(glProgram, "a_position");
+            const aTex = gl.getAttribLocation(glProgram, "a_texCoord");
+            gl.enableVertexAttribArray(aPos);
+            gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+            gl.enableVertexAttribArray(aTex);
+            gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 16, 8);
+        }
+
+        // ========== 渲染 ==========
+        function render() {
+            if (!glTexture) return;
+
+            // 更新纹理
+            gl.bindTexture(gl.TEXTURE_2D, glTexture);
+            if (isVideo && !sourceVideo.paused && !sourceVideo.ended) {
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sourceVideo);
+            }
+
+            // 渲染去畸变
+            gl.uniform1f(gl.getUniformLocation(glProgram, "u_top"), parseFloat(distortInputs.top.value));
+            gl.uniform1f(gl.getUniformLocation(glProgram, "u_bottom"), parseFloat(distortInputs.bottom.value));
+            gl.uniform1f(gl.getUniformLocation(glProgram, "u_left"), parseFloat(distortInputs.left.value));
+            gl.uniform1f(gl.getUniformLocation(glProgram, "u_right"), parseFloat(distortInputs.right.value));
+            gl.uniform1f(gl.getUniformLocation(glProgram, "u_scale"), parseFloat(distortInputs.scale.value));
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            // 复制到显示画布
+            displayCtx.clearRect(0, 0, canvasW, canvasH);
+            displayCtx.drawImage(glCanvas, 0, 0, canvasW, canvasH);
+
+            // 绘制控制点连线
+            displayCtx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+            displayCtx.lineWidth = 2;
+            displayCtx.beginPath();
+            const link = (a, b) => {
+                displayCtx.moveTo(points[a].x, points[a].y);
+                displayCtx.lineTo(points[b].x, points[b].y);
+            };
+            link(0, 1); link(1, 3); link(3, 2); link(2, 0);
+            link(0, 4); link(1, 5); link(2, 6); link(3, 7);
+            link(4, 6); link(5, 7); link(6, 7);
+            displayCtx.stroke();
+
+            updateHandlePositions();
+        }
+
+        function videoLoop() {
+            if (isVideo && isPlaying) {
+                render();
+                updateProgress();
+                animationId = requestAnimationFrame(videoLoop);
+            }
+        }
+
+        function updateHandlePositions() {
+            const rect = displayCanvas.getBoundingClientRect();
+            const scaleX = rect.width / canvasW;
+            const scaleY = rect.height / canvasH;
+            const offsetX = displayCanvas.offsetLeft;
+            const offsetY = displayCanvas.offsetTop;
+
+            points.forEach((p, i) => {
+                handles[i].style.left = (offsetX + p.x * scaleX) + 'px';
+                handles[i].style.top = (offsetY + p.y * scaleY) + 'px';
+            });
+        }
+
+        // ========== 加载媒体 ==========
+        function setupCanvas(w, h) {
+            const maxW = Math.min(800, window.innerWidth * 0.55);
+            const maxH = window.innerHeight * 0.6;
+            if (w > maxW || h > maxH) {
+                const r = Math.min(maxW / w, maxH / h);
+                w *= r; h *= r;
+            }
+            canvasW = w; canvasH = h;
+            glCanvas.width = w; glCanvas.height = h;
+            gl.viewport(0, 0, w, h);
+            displayCanvas.width = w; displayCanvas.height = h;
+
+            // 初始化控制点
+            const cx = w / 2, cy = h / 2;
+            points[0] = { x: cx - w * 0.2, y: cy - h * 0.2 };
+            points[1] = { x: cx + w * 0.2, y: cy - h * 0.2 };
+            points[2] = { x: cx - w * 0.2, y: cy + h * 0.2 };
+            points[3] = { x: cx + w * 0.2, y: cy + h * 0.2 };
+            points[4] = { x: cx - w * 0.4, y: cy - h * 0.4 };
+            points[5] = { x: cx + w * 0.4, y: cy - h * 0.4 };
+            points[6] = { x: cx - w * 0.4, y: cy + h * 0.4 };
+            points[7] = { x: cx + w * 0.4, y: cy + h * 0.4 };
+        }
+
+        function createTexture(source) {
+            if (glTexture) gl.deleteTexture(glTexture);
+            glTexture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, glTexture);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+        }
+
+        function loadImage(src) {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+                isVideo = false;
+                setupCanvas(img.width, img.height);
+                createTexture(img);
+                resetSliders();
+                showUI(false);
+                render();
+            };
+            img.src = src;
+        }
+
+        function loadVideo(src) {
+            sourceVideo.src = src;
+            sourceVideo.onloadedmetadata = () => {
+                isVideo = true;
+                setupCanvas(sourceVideo.videoWidth, sourceVideo.videoHeight);
+                sourceVideo.currentTime = 0;
+            };
+            sourceVideo.oncanplay = () => {
+                createTexture(sourceVideo);
+                resetSliders();
+                showUI(true);
+                render();
+            };
+        }
+
+        function resetSliders() {
+            Object.values(distortInputs).forEach(inp => {
+                inp.value = inp.id === 'scale' ? 1.0 : 0.0;
+                updateVal(inp.id.replace('c-', ''), inp.value);
+            });
+        }
+
+        function showUI(showVideoControls) {
+            document.getElementById('welcomeMsg').style.display = 'none';
+            document.getElementById('mainWorkspace').style.display = 'flex';
+            document.getElementById('videoControls').style.display = showVideoControls ? 'flex' : 'none';
+            document.getElementById('progressSection').style.display = showVideoControls ? 'block' : 'none';
+            document.getElementById('btnPreview3D').style.display = 'inline-flex';
+            document.getElementById('btnSaveFrame').style.display = 'inline-flex';
+            document.getElementById('btnRecordVideo').style.display = showVideoControls ? 'inline-flex' : 'none';
+        }
+
+        function updateVal(id, val) {
+            const el = document.getElementById('val-' + id);
+            if (el) el.innerText = parseFloat(val).toFixed(2);
+        }
+
+        // ========== 视频控制 ==========
+        function togglePlay() {
+            if (sourceVideo.paused) {
+                sourceVideo.play();
+                isPlaying = true;
+                document.getElementById('btnPlayPause').textContent = '⏸️ 暂停';
+                videoLoop();
+            } else {
+                sourceVideo.pause();
+                isPlaying = false;
+                document.getElementById('btnPlayPause').textContent = '▶️ 播放';
+                if (animationId) cancelAnimationFrame(animationId);
+            }
+        }
+
+        function stopVideo() {
+            sourceVideo.pause();
+            sourceVideo.currentTime = 0;
+            isPlaying = false;
+            document.getElementById('btnPlayPause').textContent = '▶️ 播放';
+            if (animationId) cancelAnimationFrame(animationId);
+            render();
+            updateProgress();
+        }
+
+        function stepFrame(delta) {
+            sourceVideo.pause();
+            isPlaying = false;
+            document.getElementById('btnPlayPause').textContent = '▶️ 播放';
+            sourceVideo.currentTime = Math.max(0, Math.min(sourceVideo.duration, sourceVideo.currentTime + delta / 30));
+            setTimeout(() => {
+                createTexture(sourceVideo);
+                render();
+                updateProgress();
+            }, 50);
+        }
+
+        function updateProgress() {
+            const pct = (sourceVideo.currentTime / sourceVideo.duration) * 100 || 0;
+            document.getElementById('progress').style.width = pct + '%';
+            const fmt = t => {
+                const m = Math.floor(t / 60);
+                const s = Math.floor(t % 60);
+                return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            };
+            document.getElementById('timeDisplay').textContent = `${fmt(sourceVideo.currentTime)} / ${fmt(sourceVideo.duration || 0)}`;
+        }
+
+        document.getElementById('progressBar').addEventListener('click', e => {
+            const rect = e.target.getBoundingClientRect();
+            const pct = (e.clientX - rect.left) / rect.width;
+            sourceVideo.currentTime = pct * sourceVideo.duration;
+            setTimeout(() => {
+                createTexture(sourceVideo);
+                render();
+                updateProgress();
+            }, 50);
+        });
+
+        // ========== 视频录制 ==========
+        function startRecording() {
+            recordedChunks = [];
+            const stream = displayCanvas.captureStream(30);
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp9' });
+            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `processed_video_${Date.now()}.webm`;
+                a.click();
+                document.getElementById('recordingIndicator').classList.remove('active');
+                document.getElementById('btnRecordVideo').textContent = '⏺️ 录制处理后视频';
+            };
+            mediaRecorder.start();
+            document.getElementById('recordingIndicator').classList.add('active');
+            document.getElementById('btnRecordVideo').textContent = '⏹️ 停止录制';
+
+            // 从头播放
+            sourceVideo.currentTime = 0;
+            sourceVideo.play();
+            isPlaying = true;
+            document.getElementById('btnPlayPause').textContent = '⏸️ 暂停';
+            videoLoop();
+
+            sourceVideo.onended = () => {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    isPlaying = false;
+                }
+            };
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                sourceVideo.pause();
+                isPlaying = false;
+            }
+        }
+
+        document.getElementById('btnRecordVideo').addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        // ========== 控制点拖动 ==========
+        handles.forEach((h, i) => {
+            h.onmousedown = e => { e.preventDefault(); activeIdx = i; };
+            h.ontouchstart = e => { e.preventDefault(); activeIdx = i; };
+        });
+
+        const onMove = e => {
+            if (activeIdx < 0) return;
+            e.preventDefault();
+            const rect = displayCanvas.getBoundingClientRect();
+            const cx = e.touches ? e.touches[0].clientX : e.clientX;
+            const cy = e.touches ? e.touches[0].clientY : e.clientY;
+            points[activeIdx].x = Math.max(0, Math.min(canvasW, (cx - rect.left) * (canvasW / rect.width)));
+            points[activeIdx].y = Math.max(0, Math.min(canvasH, (cy - rect.top) * (canvasH / rect.height)));
+            render();
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('touchmove', onMove, { passive: false });
+        window.addEventListener('mouseup', () => activeIdx = -1);
+        window.addEventListener('touchend', () => activeIdx = -1);
+
+        // ========== 滑块事件 ==========
+        Object.keys(distortInputs).forEach(key => {
+            distortInputs[key].addEventListener('input', e => {
+                updateVal(key, e.target.value);
+                render();
+            });
+        });
+
+        // ========== 贴图生成 ==========
+        function generateTextures() {
+            const imgData = displayCtx.getImageData(0, 0, canvasW, canvasH);
+            const avg = getAvgColor(imgData);
+            for (let k in faces) warp(faces[k], resCanvases[k], imgData, avg);
+        }
+
+        function warp(idx, cvs, srcData, fill) {
+            const ps = idx.map(i => points[i]);
+            const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+            const w = Math.max(dist(ps[0], ps[1]), dist(ps[2], ps[3])) | 0;
+            const h = Math.max(dist(ps[0], ps[3]), dist(ps[1], ps[2])) | 0;
+            if (w < 1 || h < 1) return;
+
+            cvs.width = w; cvs.height = h;
+            const ctx = cvs.getContext('2d');
+            const dDst = ctx.createImageData(w, h);
+            const H = calcH(w, h, ps);
+            if (!H) return;
+
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const z = H[6] * x + H[7] * y + H[8];
+                    const u = (H[0] * x + H[1] * y + H[2]) / z;
+                    const v = (H[3] * x + H[4] * y + H[5]) / z;
+                    const srcIdx = ((v | 0) * canvasW + (u | 0)) * 4;
+                    const dstIdx = (y * w + x) * 4;
+                    if (u >= 0 && u < canvasW && v >= 0 && v < canvasH) {
+                        dDst.data.set(srcData.data.subarray(srcIdx, srcIdx + 4), dstIdx);
+                    } else {
+                        dDst.data.set([fill.r, fill.g, fill.b, 255], dstIdx);
+                    }
+                }
+            }
+            ctx.putImageData(dDst, 0, 0);
+        }
+
+        function calcH(w, h, p) {
+            let sx = [p[0].x, p[1].x, p[2].x, p[3].x], sy = [p[0].y, p[1].y, p[2].y, p[3].y];
+            let dx = [0, w, w, 0], dy = [0, 0, h, h];
+            let A = [], B = [];
+            for (let i = 0; i < 4; i++) {
+                A.push([dx[i], dy[i], 1, 0, 0, 0, -sx[i] * dx[i], -sx[i] * dy[i]]);
+                A.push([0, 0, 0, dx[i], dy[i], 1, -sy[i] * dx[i], -sy[i] * dy[i]]);
+                B.push(sx[i]); B.push(sy[i]);
+            }
+            try {
+                let n = 8;
+                for (let i = 0; i < n; i++) {
+                    let max = i;
+                    for (let k = i + 1; k < n; k++) if (Math.abs(A[k][i]) > Math.abs(A[max][i])) max = k;
+                    [A[i], A[max]] = [A[max], A[i]];[B[i], B[max]] = [B[max], B[i]];
+                    for (let j = i + 1; j < n; j++) {
+                        let f = A[j][i] / A[i][i]; B[j] -= f * B[i];
+                        for (let k = i; k < n; k++) A[j][k] -= f * A[i][k];
+                    }
+                }
+                let x = new Array(n);
+                for (let i = n - 1; i >= 0; i--) {
+                    let sum = 0;
+                    for (let j = i + 1; j < n; j++) sum += A[i][j] * x[j];
+                    x[i] = (B[i] - sum) / A[i][i];
+                }
+                return [...x, 1];
+            } catch (e) { return null; }
+        }
+
+        function getAvgColor(d) {
+            let r = 0, g = 0, b = 0, c = 0;
+            for (let i = 0; i < d.data.length; i += 40) {
+                if (d.data[i + 3] > 0) { r += d.data[i]; g += d.data[i + 1]; b += d.data[i + 2]; c++; }
+            }
+            return { r: r / c | 0, g: g / c | 0, b: b / c | 0 };
+        }
+
+        // ========== 事件绑定 ==========
+        document.getElementById('uploadVideo').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (file) loadVideo(URL.createObjectURL(file));
+        });
+
+        document.getElementById('uploadImage').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = ev => loadImage(ev.target.result);
+                reader.readAsDataURL(file);
+            }
+        });
+
+        document.getElementById('btnPlayPause').addEventListener('click', togglePlay);
+        document.getElementById('btnStop').addEventListener('click', stopVideo);
+        document.getElementById('btnPrevFrame').addEventListener('click', () => stepFrame(-1));
+        document.getElementById('btnNextFrame').addEventListener('click', () => stepFrame(1));
+
+        document.getElementById('btnPreview3D').addEventListener('click', () => {
+            if (isVideo && isPlaying) {
+                sourceVideo.pause();
+                isPlaying = false;
+                document.getElementById('btnPlayPause').textContent = '▶️ 播放';
+            }
+            generateTextures();
+            document.getElementById('stage-3d').style.display = 'flex';
+            document.getElementById('btnExportGLB').style.display = 'inline-flex';
+            setTimeout(() => window.preview3D(), 100);
+        });
+
+        document.getElementById('btnSaveFrame').addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = `frame_${Date.now()}.png`;
+            link.href = displayCanvas.toDataURL('image/png');
+            link.click();
+        });
+
+        initWebGL();
+    </script>
+
+    <!-- Three.js 3D 模块 -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+        let scene, camera, renderer, controls, roomGroup, materials = {};
+        let initialized = false;
+        const container = document.getElementById('threeContainer');
+
+        window.preview3D = function () {
+            if (!initialized) { init3D(); initialized = true; }
+            else refreshTextures();
+            updateRoom();
+        };
+
+        window.update3DParams = function () {
+            document.getElementById('depthVal').innerText = document.getElementById('depthSlider').value;
+            document.getElementById('heightVal').innerText = document.getElementById('heightSlider').value;
+            if (initialized) updateRoom();
+        };
+
+        function refreshTextures() {
+            ['back', 'left', 'right', 'bottom'].forEach(k => {
+                const cvs = document.getElementById('res' + k.charAt(0).toUpperCase() + k.slice(1));
+                materials[k].map = new THREE.CanvasTexture(cvs);
+                materials[k].map.colorSpace = THREE.SRGBColorSpace;
+                materials[k].needsUpdate = true;
+            });
+        }
+
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+
+            const w = container.clientWidth || 800, h = container.clientHeight || 500;
+            camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 2000);
+            camera.position.set(0, 50, 400);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(w, h);
+            container.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            scene.add(new THREE.AmbientLight(0xffffff, 2.0));
+
+            ['back', 'left', 'right', 'bottom'].forEach(k => {
+                const cvs = document.getElementById('res' + k.charAt(0).toUpperCase() + k.slice(1));
+                const tex = new THREE.CanvasTexture(cvs);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                materials[k] = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+            });
+
+            (function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            })();
+        }
+
+        function createMesh(w, h, mat, flipX, flipY) {
+            const geo = new THREE.PlaneGeometry(w, h);
+            const uvs = geo.attributes.uv;
+            for (let i = 0; i < uvs.count; i++) {
+                let u = uvs.getX(i), v = uvs.getY(i);
+                if (flipX) u = 1 - u;
+                if (flipY) v = 1 - v;
+                uvs.setXY(i, u, v);
+            }
+            uvs.needsUpdate = true;
+            return new THREE.Mesh(geo, mat);
+        }
+
+        function updateRoom() {
+            if (roomGroup) scene.remove(roomGroup);
+            roomGroup = new THREE.Group();
+
+            const bw = document.getElementById('resBack').width || 100;
+            const bh = document.getElementById('resBack').height || 100;
+            const lw = document.getElementById('resLeft').width || 100;
+            const rw = document.getElementById('resRight').width || 100;
+
+            const hs = parseFloat(document.getElementById('heightSlider').value);
+            const ds = parseFloat(document.getElementById('depthSlider').value);
+
+            const w = bw, h = bh * hs, d = ((lw + rw) / 2) * ds;
+
+            const getFlip = pre => ({
+                x: document.getElementById(pre + 'X').checked,
+                y: document.getElementById(pre + 'Y').checked
+            });
+
+            const back = createMesh(w, h, materials.back, getFlip('chkBack').x, getFlip('chkBack').y);
+            back.position.set(0, 0, -d / 2);
+            roomGroup.add(back);
+
+            const left = createMesh(d, h, materials.left, getFlip('chkLeft').x, getFlip('chkLeft').y);
+            left.position.set(-w / 2, 0, 0);
+            left.rotation.y = Math.PI / 2;
+            roomGroup.add(left);
+
+            const right = createMesh(d, h, materials.right, getFlip('chkRight').x, getFlip('chkRight').y);
+            right.position.set(w / 2, 0, 0);
+            right.rotation.y = -Math.PI / 2;
+            roomGroup.add(right);
+
+            const bottom = createMesh(w, d, materials.bottom, getFlip('chkBottom').x, getFlip('chkBottom').y);
+            bottom.position.set(0, -h / 2, 0);
+            bottom.rotation.x = -Math.PI / 2;
+            roomGroup.add(bottom);
+
+            scene.add(roomGroup);
+        }
+
+        window.exportGLB = function () {
+            new GLTFExporter().parse(roomGroup, gltf => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(new Blob([gltf], { type: 'application/octet-stream' }));
+                link.download = 'classroom_3d.glb';
+                link.click();
+            }, e => console.error(e), { binary: true, embedImages: true });
+        };
+
+        ['heightSlider', 'depthSlider'].forEach(id =>
+            document.getElementById(id).addEventListener('input', window.update3DParams));
+        ['chkBackX', 'chkBackY', 'chkLeftX', 'chkLeftY', 'chkRightX', 'chkRightY', 'chkBottomX', 'chkBottomY'].forEach(id =>
+            document.getElementById(id).addEventListener('change', window.update3DParams));
+        document.getElementById('btnExportGLB').addEventListener('click', window.exportGLB);
+    </script>
+</body>
+
+</html>
