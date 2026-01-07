@@ -28,8 +28,8 @@ export class VideoSegmenter {
         this.regions = {
             'box_qian': { x: 0.0, y: 0.0, w: 0.25, h: 1.0 },
             'box_hou': { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            'box_zuo': { x: 0.25, y: 0.0, w: 0.25, h: 1.0 },
-            'box_you': { x: 0.5, y: 0.0, w: 0.25, h: 1.0 },
+            'box_zuo': { x: 0.5, y: 0.0, w: 0.25, h: 1.0 },
+            'box_you': { x: 0.25, y: 0.0, w: 0.25, h: 1.0 },
             'box_di': { x: 0.75, y: 0.0, w: 0.25, h: 1.0 }
         };
 
