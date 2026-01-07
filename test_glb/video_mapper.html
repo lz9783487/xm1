@@ -625,16 +625,52 @@
 
                 // Map Materials
                 mats = {};
-                mats['left'] = scene.getMaterialByName('Material.001');
-                mats['back'] = scene.getMaterialByName('Material.002');
-                mats['right'] = scene.getMaterialByName('Material.003');
+                // Fixed Material Mapping based on Geometry:
+                // Left (-X): Material.002 
+                // Right (+X): Material.004
+                // Back (+Z): Material.003
+                // Floor (Flat Y): Material.005
+                mats['left'] = scene.getMaterialByName('Material.002');
+                mats['back'] = scene.getMaterialByName('Material.003');
+                mats['right'] = scene.getMaterialByName('Material.004');
                 mats['floor'] = scene.getMaterialByName('Material.005');
 
                 // Debug: Log materials if some are missing
-                if (!mats['left']) console.warn('Material.001 (left) not found');
-                if (!mats['back']) console.warn('Material.002 (back) not found');
-                if (!mats['right']) console.warn('Material.003 (right) not found');
+                if (!mats['left']) console.warn('Material.002 (left) not found');
+                if (!mats['back']) console.warn('Material.003 (back) not found');
+                if (!mats['right']) console.warn('Material.004 (right) not found');
                 if (!mats['floor']) console.warn('Material.005 (floor) not found');
+
+                // FIX: Recalculate floor mesh UVs based on X-Z plane projection
+                // The floor mesh has degenerate UVs because it's a horizontal plane (Y≈0)
+                // and the original UVs were likely calculated from X-Y, making V constant.
+                result.meshes.forEach(m => {
+                    if (m.material && m.material.name === 'Material.005') {
+                        const positions = m.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+                        if (positions) {
+                            const uvs = [];
+                            // Get bounding box for normalization
+                            const bb = m.getBoundingInfo().boundingBox;
+                            const minX = bb.minimumWorld.x;
+                            const maxX = bb.maximumWorld.x;
+                            const minZ = bb.minimumWorld.z;
+                            const maxZ = bb.maximumWorld.z;
+                            const rangeX = maxX - minX || 1;
+                            const rangeZ = maxZ - minZ || 1;
+
+                            // Calculate new UVs from X-Z positions (normalized to 0-1)
+                            for (let i = 0; i < positions.length; i += 3) {
+                                const x = positions[i];
+                                const z = positions[i + 2];
+                                const u = (x - minX) / rangeX;
+                                const v = (z - minZ) / rangeZ;
+                                uvs.push(u, v);
+                            }
+                            m.setVerticesData(BABYLON.VertexBuffer.UVKind, uvs, true);
+                            console.log('Floor mesh UVs recalculated based on X-Z projection');
+                        }
+                    }
+                });
 
                 threeInit = true;
                 updateMats();
@@ -644,8 +680,6 @@
             window.addEventListener('resize', () => engine.resize());
             new ResizeObserver(() => engine.resize()).observe(bCanvas);
         }
-
-
 
         function updateMats() {
             if (!threeInit) return;
@@ -662,11 +696,23 @@
             const apply = (key, mat, suffix) => {
                 if (!mat) return;
                 const cvs = texCvs[key];
+                if (!cvs || cvs.width < 1 || cvs.height < 1) return;
 
-                if (!mat.albedoTexture || mat.albedoTexture.name !== key) {
-                    const tex = new BABYLON.DynamicTexture(key, cvs, scene, false);
+                // FIX: Check if texture size matches canvas size, recreate if not
+                const needsRecreate = !mat.albedoTexture ||
+                    mat.albedoTexture.name !== key ||
+                    mat.albedoTexture.getSize().width !== cvs.width ||
+                    mat.albedoTexture.getSize().height !== cvs.height;
+
+                if (needsRecreate) {
+                    // Dispose old texture
+                    if (mat.albedoTexture) {
+                        mat.albedoTexture.dispose();
+                    }
+                    // Create new DynamicTexture with correct size
+                    const tex = new BABYLON.DynamicTexture(key, { width: cvs.width, height: cvs.height }, scene, false);
                     tex.hasAlpha = false;
-                    // FIX: Set rotation/scale center to middle
+                    // Set rotation/scale center to middle
                     tex.uRotationCenter = 0.5;
                     tex.vRotationCenter = 0.5;
 

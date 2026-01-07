@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 模型视频映射 (8点透视框选)</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #111;
+            font-family: sans-serif;
+        }
+
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            outline: none;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 50;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            color: #eee;
+            border: 1px solid #444;
+            backdrop-filter: blur(5px);
+        }
+
+        button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 5px;
+            font-size: 12px;
+        }
+
+        button:hover {
+            background: #005bb5;
+        }
+
+        .status {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #00ff99;
+        }
+
+        #editorModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 200;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toolbar {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+            background: #222;
+            padding: 10px;
+            border-radius: 8px;
+            justify-content: center;
+        }
+
+        .toolbar span {
+            color: #00ff99;
+            line-height: 30px;
+            margin-right: 10px;
+        }
+
+        #regionCanvas {
+            border: 2px solid #333;
+            cursor: crosshair;
+            background: #000;
+        }
+
+        .handle {
+            width: 18px;
+            height: 18px;
+            background: rgba(255, 69, 0, 0.9);
+            border: 2px solid white;
+            border-radius: 50%;
+            position: absolute;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+            z-index: 20;
+        }
+
+        .handle.front {
+            background: rgba(0, 150, 255, 0.9);
+        }
+
+        .handle::after {
+            content: attr(data-label);
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .editor-container {
+            position: relative;
+            line-height: 0;
+            user-select: none;
+        }
+
+        .legend {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #aaa;
+            text-align: center;
+        }
+
+        .legend span {
+            margin: 0 10px;
+        }
+
+        .legend .back-color {
+            color: #FF4500;
+        }
+
+        .legend .front-color {
+            color: #0096FF;
+        }
+    </style>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+</head>
+
+<body>
+
+    <div class="ui-layer">
+        <h3 style="margin-top:0">控制台</h3>
+        <div>
+            <input type="file" id="videoInput" accept="video/*" style="display:none">
+            <button onclick="document.getElementById('videoInput').click()">📂 加载本地视频</button>
+            <button onclick="startWebcam()">📷 使用摄像头</button>
+        </div>
+        <div style="margin-top: 10px; border-top: 1px solid #444; padding-top: 10px;">
+            <div style="margin-bottom: 10px;">
+                <label style="color: #ccc;">
+                    <input type="checkbox" id="enableDewarp" checked onchange="toggleDewarp(this.checked)">
+                    启用透视校正
+                </label>
+            </div>
+            <button onclick="openEditor()" id="btnEdit" style="background: #e65c00; width: 100%; display:none">✏️
+                框选区域 (8点)</button>
+        </div>
+        <div id="status" class="status">正在初始化...</div>
+    </div>
+
+    <div id="editorModal">
+        <div class="toolbar">
+            <span>拖动8个控制点调整透视区域</span>
+            <button onclick="selector.save()" style="background: #00cc66;">✅ 完成并应用</button>
+            <button onclick="selector.close()" style="background: #666;">❌ 取消</button>
+        </div>
+        <div class="editor-container" id="editorStage">
+            <canvas id="regionCanvas"></canvas>
+            <!-- 8个拖拽点: 0-3内框(后墙), 4-7外框(前框) -->
+            <div class="handle back" id="h0" data-label="后左上"></div>
+            <div class="handle back" id="h1" data-label="后右上"></div>
+            <div class="handle back" id="h2" data-label="后左下"></div>
+            <div class="handle back" id="h3" data-label="后右下"></div>
+            <div class="handle front" id="h4" data-label="前左上"></div>
+            <div class="handle front" id="h5" data-label="前右上"></div>
+            <div class="handle front" id="h6" data-label="前左下"></div>
+            <div class="handle front" id="h7" data-label="前右下"></div>
+        </div>
+        <div class="legend">
+            <span class="back-color">● 内框(后墙/前面)</span>
+            <span class="front-color">● 外框(前框)</span>
+            <span>| 红=前 绿=左 蓝=右 黄=底</span>
+        </div>
+    </div>
+
+    <canvas id="renderCanvas"></canvas>
+
+    <script type="module">
+        import { VideoSegmenter } from './video_segmenter.js';
+        import { SceneRender } from './scene_render.js';
+
+        const statusEl = document.getElementById('status');
+        const btnEdit = document.getElementById('btnEdit');
+        const editorModal = document.getElementById('editorModal');
+        const regionCanvas = document.getElementById('regionCanvas');
+        const ctx = regionCanvas.getContext('2d', { willReadFrequently: true });
+        const handles = Array.from({ length: 8 }, (_, i) => document.getElementById(`h${i}`));
+
+        const renderer = new SceneRender('renderCanvas');
+        const segmenter = new VideoSegmenter();
+
+        renderer.init().then(() => {
+            statusEl.innerText = "3D 场景就绪，请选择视频源";
+        }).catch(console.error);
+
+        // ==================== 8点透视选择器 ====================
+        const selector = {
+            videoElement: null,
+            activeHandleIdx: -1,
+            animationId: null,
+
+            // 8个透视点 (归一化坐标)
+            // 布局示意:
+            //   4 -------- 5     (前框上边)
+            //   |  0 -- 1  |     (后墙上边)
+            //   |  2 -- 3  |     (后墙下边)
+            //   6 -------- 7     (前框下边)
+            points: [
+                { x: 0.30, y: 0.25 }, { x: 0.70, y: 0.25 }, // 0,1 后墙上
+                { x: 0.30, y: 0.75 }, { x: 0.70, y: 0.75 }, // 2,3 后墙下
+                { x: 0.10, y: 0.05 }, { x: 0.90, y: 0.05 }, // 4,5 前框上
+                { x: 0.10, y: 0.95 }, { x: 0.90, y: 0.95 }  // 6,7 前框下
+            ],
+
+            // 4个面的点索引 (按照 左上、右上、右下、左下 顺时针顺序)
+            // 这样 DewarpProcessor 可以正确计算单应性矩阵
+            faces: {
+                'box_qian': [0, 1, 3, 2], // 后墙/前面: 0左上,1右上,3右下,2左下
+                'box_zuo': [4, 0, 2, 6],  // 左墙: 4前左上,0后左上,2后左下,6前左下
+                'box_you': [1, 5, 7, 3],  // 右墙: 1后右上,5前右上,7前右下,3后右下
+                'box_di': [2, 3, 7, 6]    // 底面: 2后左下,3后右下,7前右下,6前左下
+            },
+
+            colors: {
+                'box_qian': '#FF0000', // 红色
+                'box_zuo': '#00FF00',  // 绿色
+                'box_you': '#0000FF',  // 蓝色
+                'box_di': '#FFFF00'    // 黄色
+            },
+
+            faceLabels: {
+                'box_qian': '前',
+                'box_zuo': '左',
+                'box_you': '右',
+                'box_di': '底'
+            },
+
+            open(video, regions) {
+                this.videoElement = video;
+                editorModal.style.display = 'flex';
+                this.resize();
+                this.updateHandles();
+                this.loop();
+            },
+
+            close() {
+                editorModal.style.display = 'none';
+                this.videoElement = null;
+                if (this.animationId) cancelAnimationFrame(this.animationId);
+            },
+
+            updateHandles() {
+                handles.forEach((h, i) => {
+                    h.style.left = (this.points[i].x * 100) + '%';
+                    h.style.top = (this.points[i].y * 100) + '%';
+                });
+            },
+
+            resize() {
+                if (!this.videoElement) return;
+                const aspect = this.videoElement.videoWidth / this.videoElement.videoHeight;
+                if (!aspect) return;
+
+                const containerW = editorModal.clientWidth * 0.8;
+                const containerH = editorModal.clientHeight * 0.75;
+
+                if (containerW / containerH > aspect) {
+                    regionCanvas.height = containerH;
+                    regionCanvas.width = containerH * aspect;
+                } else {
+                    regionCanvas.width = containerW;
+                    regionCanvas.height = containerW / aspect;
+                }
+            },
+
+            loop() {
+                if (editorModal.style.display === 'none' || !this.videoElement) return;
+                this.animationId = requestAnimationFrame(() => this.loop());
+
+                const vw = regionCanvas.width;
+                const vh = regionCanvas.height;
+                ctx.clearRect(0, 0, vw, vh);
+
+                ctx.drawImage(this.videoElement, 0, 0, vw, vh);
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.fillRect(0, 0, vw, vh);
+
+                // 绘制4个面
+                for (let face in this.faces) {
+                    this.drawFace(face);
+                }
+
+                // 绘制连接线
+                this.drawConnections();
+            },
+
+            drawFace(face) {
+                const indices = this.faces[face];
+                const color = this.colors[face];
+                const pts = indices.map(i => this.points[i]);
+                const vw = regionCanvas.width, vh = regionCanvas.height;
+
+                // 半透明填充
+                ctx.fillStyle = color + '40';
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x * vw, pts[0].y * vh);
+                for (let i = 1; i < pts.length; i++) {
+                    ctx.lineTo(pts[i].x * vw, pts[i].y * vh);
+                }
+                ctx.closePath();
+                ctx.fill();
+
+                // 边框
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // 标签
+                const centerX = pts.reduce((s, p) => s + p.x, 0) / 4 * vw;
+                const centerY = pts.reduce((s, p) => s + p.y, 0) / 4 * vh;
+                ctx.fillStyle = color;
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.faceLabels[face], centerX, centerY);
+            },
+
+            drawConnections() {
+                const vw = regionCanvas.width, vh = regionCanvas.height;
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+
+                const connections = [[0, 4], [1, 5], [2, 6], [3, 7]];
+                ctx.beginPath();
+                connections.forEach(([a, b]) => {
+                    ctx.moveTo(this.points[a].x * vw, this.points[a].y * vh);
+                    ctx.lineTo(this.points[b].x * vw, this.points[b].y * vh);
+                });
+                ctx.stroke();
+                ctx.setLineDash([]);
+            },
+
+            getFacePoints(face) {
+                const indices = this.faces[face];
+                return indices.map(i => ({ ...this.points[i] }));
+            },
+
+            save() {
+                console.log("保存透视点:", this.points);
+
+                // 将4个面的透视点传递给 segmenter
+                for (let face in this.faces) {
+                    const facePoints = this.getFacePoints(face);
+                    console.log(`${face} 点:`, facePoints);
+                    segmenter.setPerspectivePoints(face, facePoints);
+                }
+
+                this.close();
+            }
+        };
+
+        window.selector = selector;
+
+        // ==================== 事件绑定 ====================
+
+        handles.forEach((h, i) => {
+            h.onmousedown = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                selector.activeHandleIdx = i;
+            };
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (selector.activeHandleIdx < 0) return;
+
+            const editorStage = document.getElementById('editorStage');
+            const rect = editorStage.getBoundingClientRect();
+            let x = (e.clientX - rect.left) / rect.width;
+            let y = (e.clientY - rect.top) / rect.height;
+
+            x = Math.max(0, Math.min(1, x));
+            y = Math.max(0, Math.min(1, y));
+
+            selector.points[selector.activeHandleIdx] = { x, y };
+            selector.updateHandles();
+        });
+
+        document.addEventListener('mouseup', () => {
+            selector.activeHandleIdx = -1;
+        });
+
+        window.addEventListener('resize', () => selector.resize());
+
+        // ==================== 渲染循环 ====================
+
+        renderer.setRenderCallback(() => {
+            if (segmenter.isPlaying) {
+                segmenter.processFrame();
+                renderer.updateTextures(segmenter.getCanvases());
+            }
+        });
+
+        // ==================== 逻辑控制 ====================
+
+        function onVideoReady() {
+            btnEdit.style.display = 'block';
+            renderer.bindTexturesToMaterials(segmenter.getCanvases());
+            segmenter.setDewarpMode(true);
+        }
+
+        document.getElementById('videoInput').onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            statusEl.innerText = "加载视频中...";
+            segmenter.loadVideo(url).then(() => {
+                onVideoReady();
+                statusEl.innerText = "播放中 - 可点击[框选区域]";
+            });
+        };
+
+        window.startWebcam = () => {
+            statusEl.innerText = "请求摄像头...";
+            segmenter.loadWebcam().then(() => {
+                onVideoReady();
+                statusEl.innerText = "直播中 - 可点击[框选区域]";
+            });
+        };
+
+        window.openEditor = () => {
+            if (!segmenter.isPlaying) return;
+            selector.open(segmenter.videoElement, segmenter.getRegions());
+        };
+
+        window.toggleDewarp = (enabled) => {
+            segmenter.setDewarpMode(enabled);
+            console.log('透视校正:', enabled ? '已启用' : '已禁用');
+        };
+
+    </script>
+</body>
+
+</html>

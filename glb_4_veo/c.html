@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 模型五面独立视频播放 (智能底面定向)</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #111;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #renderCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            outline: none;
+            z-index: 1;
+        }
+
+        /* 控制面板 */
+        .controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 100;
+            background: rgba(20, 20, 20, 0.9);
+            backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            box-sizing: border-box;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+            min-width: 80px;
+        }
+
+        .control-group label {
+            font-size: 11px;
+            color: #bbb;
+            font-weight: 600;
+        }
+
+        /* 按钮样式 */
+        .btn-file {
+            position: relative;
+            overflow: hidden;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #333;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 5px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #eee;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .btn-file:hover {
+            background: #444;
+            border-color: #888;
+            transform: translateY(-1px);
+        }
+
+        .btn-file input[type=file] {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+            left: 0;
+            top: 0;
+        }
+
+        .btn-blue {
+            background: #0066cc;
+            border-color: #005bb5;
+            color: white;
+        }
+
+        .divider {
+            width: 1px;
+            height: 35px;
+            background: rgba(255, 255, 255, 0.15);
+            margin: 0 5px;
+        }
+
+        .status {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 50;
+            color: #00ff99;
+            font-size: 13px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 6px 12px;
+            border-radius: 4px;
+            pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>1. 模型 (GLB)</label>
+            <div class="btn-file btn-blue">
+                📦 导入
+                <input type="file" id="fileGLB" accept=".glb,.gltf">
+            </div>
+        </div>
+        <div class="divider"></div>
+        <div class="control-group"><label>前 (qian)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_qian" accept="video/*">
+            </div>
+        </div>
+        <div class="control-group"><label>后 (hou)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_hou" accept="video/*">
+            </div>
+        </div>
+        <div class="control-group"><label>左 (zuo)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_zuo" accept="video/*">
+            </div>
+        </div>
+        <div class="control-group"><label>右 (you)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_you" accept="video/*">
+            </div>
+        </div>
+        <div class="control-group"><label>底 (di)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_di" accept="video/*"></div>
+        </div>
+    </div>
+
+    <div id="status" class="status">等待导入 GLB 模型...</div>
+    <canvas id="renderCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById("renderCanvas");
+
+        // 阻止默认滚动行为（放大模型不放大页面）
+        canvas.addEventListener("wheel", (evt) => evt.preventDefault(), { passive: false });
+
+        const engine = new BABYLON.Engine(canvas, true);
+        const scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0.08, 0.08, 0.1, 1);
+
+        const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 10, new BABYLON.Vector3(0, 0, 0), scene);
+        camera.attachControl(canvas, true);
+        camera.wheelPrecision = 30; camera.minZ = 0.1;
+
+        const hemiLight = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), scene);
+        hemiLight.intensity = 0.8;
+        const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-1, -2, -1), scene);
+        dirLight.intensity = 0.5;
+
+        // 材质映射表 (移除了 rotation 字段，因为不再手动控制)
+        let materialsMap = {
+            'box_qian': { name: 'box_qian', matObject: null, texture: null },
+            'box_hou': { name: 'box_hou', matObject: null, texture: null },
+            'box_zuo': { name: 'box_zuo', matObject: null, texture: null },
+            'box_you': { name: 'box_you', matObject: null, texture: null },
+            'box_di': { name: 'box_di', matObject: null, texture: null }
+        };
+
+        // === 2. 加载模型 ===
+        document.getElementById('fileGLB').onchange = (evt) => {
+            const file = evt.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            document.getElementById('status').innerText = "加载模型中...";
+
+            BABYLON.SceneLoader.ImportMeshAsync("", url, "", scene, null, ".glb").then((result) => {
+                const root = result.meshes[0];
+                root.normalizeToUnitCube();
+                document.getElementById('status').innerText = "模型就绪，请上传视频";
+
+                // 2.1 绑定材质
+                let foundCount = 0;
+                for (let key in materialsMap) {
+                    const targetName = materialsMap[key].name;
+                    const foundMat = scene.getMaterialByName(targetName);
+                    if (foundMat) {
+                        materialsMap[key].matObject = foundMat;
+                        foundMat.roughness = 1.0;
+                        foundMat.metallic = 0.0;
+                        foundMat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+                        foundCount++;
+                    }
+                }
+
+                // 2.2 智能修复底面 UV
+                // 我们需要传入 scene 对象来查找 qian 和 hou
+                result.meshes.forEach(m => {
+                    if (m.material && m.material.name === materialsMap['box_di'].name) {
+                        fixFloorUVsSmart(m, scene);
+                    }
+                });
+
+                document.getElementById('status').innerText = `加载完成 (${foundCount}/5 个面)`;
+            }).catch(console.error);
+        };
+
+        // === 3. 视频上传 ===
+        document.querySelectorAll('.video-input').forEach(input => {
+            input.onchange = (evt) => {
+                const file = evt.target.files[0];
+                const face = evt.target.dataset.face;
+                if (!file || !materialsMap[face].matObject) return;
+                applyVideoToFace(face, URL.createObjectURL(file));
+            };
+        });
+
+        function applyVideoToFace(faceKey, videoUrl) {
+            const target = materialsMap[faceKey];
+            if (!target.matObject) return;
+            if (target.texture) target.texture.dispose();
+
+            const videoTexture = new BABYLON.VideoTexture(
+                `vid_${faceKey}`, videoUrl, scene, true, false,
+                BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+                { autoPlay: true, loop: true, muted: true }
+            );
+
+            // === 核心方向控制 ===
+            // 侧面：vScale = -1 解决倒置问题
+            // 底面：vScale = 1，因为我们在 fixFloorUVsSmart 里手动计算好了方向
+            if (faceKey === 'box_di') {
+                videoTexture.uScale = 1;
+                videoTexture.vScale = 1;
+                videoTexture.wAng = 0; // 无需旋转，UV 已经对了
+            } else {
+                videoTexture.uScale = 1;
+                videoTexture.vScale = -1; // 侧面翻转
+                videoTexture.wAng = 0;    // 移除之前的旋转逻辑
+            }
+
+            target.matObject.albedoTexture = videoTexture;
+            target.matObject.emissiveTexture = videoTexture;
+            target.matObject.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            target.texture = videoTexture;
+        }
+
+        // === 4. 智能底面 UV 算法 ===
+        // 根据 box_qian 和 box_hou 的位置决定 UV 方向
+        function fixFloorUVsSmart(floorMesh, scene) {
+            // 1. 尝试在场景中找到 box_qian 和 box_hou 的网格
+            // 注意：这里假设网格名称包含了关键字，或者你明确知道网格名
+            // 这里我们用一种模糊匹配方法，找到使用对应材质的网格
+            let meshQian = null;
+            let meshHou = null;
+
+            scene.meshes.forEach(m => {
+                if (m.material && m.material.name === 'box_qian') meshQian = m;
+                if (m.material && m.material.name === 'box_hou') meshHou = m;
+            });
+
+            if (!meshQian || !meshHou) {
+                console.warn("无法找到 box_qian 或 box_hou，底面将使用默认 UV");
+                // 如果找不到，就用普通的铺满逻辑
+                fixFloorUVsDefault(floorMesh);
+                return;
+            }
+
+            // 2. 获取它们的世界坐标中心
+            // 使用 BoundingBox 中心比 position 更稳健
+            const centerQian = meshQian.getBoundingInfo().boundingBox.centerWorld;
+            const centerHou = meshHou.getBoundingInfo().boundingBox.centerWorld;
+
+            console.log("Qian Center:", centerQian);
+            console.log("Hou Center:", centerHou);
+
+            // 3. 计算底面的顶点范围
+            const positions = floorMesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+            if (!positions) return;
+
+            let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+            for (let i = 0; i < positions.length; i += 3) {
+                const x = positions[i];
+                const z = positions[i + 2];
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            }
+            const rangeX = maxX - minX || 1;
+            const rangeZ = maxZ - minZ || 1;
+
+            // 4. 判断方向轴
+            // 计算 Qian 和 Hou 在 X轴 和 Z轴 上的距离差
+            const diffX = centerQian.x - centerHou.x;
+            const diffZ = centerQian.z - centerHou.z;
+
+            // 判断模型主要是沿着 Z轴 还是 X轴 排列的
+            const isAlignedZ = Math.abs(diffZ) > Math.abs(diffX);
+
+            // 5. 生成 UV
+            // 目标：视频上侧 (V=1) 贴着 Qian，下侧 (V=0) 贴着 Hou
+            const uvs = [];
+
+            for (let i = 0; i < positions.length; i += 3) {
+                const x = positions[i];
+                const z = positions[i + 2];
+
+                let u, v;
+
+                if (isAlignedZ) {
+                    // 主轴是 Z
+                    // U 轴通常对应 X
+                    u = (x - minX) / rangeX;
+
+                    if (diffZ > 0) {
+                        // Qian 在 +Z 方向 (MaxZ)
+                        // 我们需要 V=1 在 MaxZ，V=0 在 MinZ
+                        v = (z - minZ) / rangeZ;
+                    } else {
+                        // Qian 在 -Z 方向 (MinZ)
+                        // 我们需要 V=1 在 MinZ，V=0 在 MaxZ
+                        v = 1.0 - ((z - minZ) / rangeZ);
+                    }
+                } else {
+                    // 主轴是 X (模型可能被旋转了90度)
+                    // 这种情况下，Z 变成了 U，X 变成了 V
+                    u = (z - minZ) / rangeZ;
+
+                    if (diffX > 0) {
+                        // Qian 在 +X 方向
+                        v = (x - minX) / rangeX;
+                    } else {
+                        // Qian 在 -X 方向
+                        v = 1.0 - ((x - minX) / rangeX);
+                    }
+                }
+
+                uvs.push(u, v);
+            }
+
+            floorMesh.setVerticesData(BABYLON.VertexBuffer.UVKind, uvs);
+            console.log("✅ 底面 UV 已根据 [前/后] 坐标智能对齐");
+        }
+
+        // 备用：普通的 UV 铺满 (如果找不到前后参照物)
+        function fixFloorUVsDefault(mesh) {
+            const positions = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+            let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+            for (let i = 0; i < positions.length; i += 3) {
+                if (positions[i] < minX) minX = positions[i]; if (positions[i] > maxX) maxX = positions[i];
+                if (positions[i + 2] < minZ) minZ = positions[i + 2]; if (positions[i + 2] > maxZ) maxZ = positions[i + 2];
+            }
+            const rX = maxX - minX || 1, rZ = maxZ - minZ || 1;
+            const uvs = [];
+            for (let i = 0; i < positions.length; i += 3) uvs.push((positions[i] - minX) / rX, (positions[i + 2] - minZ) / rZ);
+            mesh.setVerticesData(BABYLON.VertexBuffer.UVKind, uvs);
+        }
+
+        engine.runRenderLoop(() => scene.render());
+        window.addEventListener("resize", () => engine.resize());
+    </script>
+</body>
+
+</html>

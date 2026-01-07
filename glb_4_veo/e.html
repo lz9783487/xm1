@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 模型五面独立视频播放 (硬编码路径版)</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #111;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #renderCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            outline: none;
+            z-index: 1;
+        }
+
+        .controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 100;
+            background: rgba(20, 20, 20, 0.9);
+            backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            box-sizing: border-box;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+            min-width: 80px;
+        }
+
+        .control-group label {
+            font-size: 11px;
+            color: #bbb;
+            font-weight: 600;
+        }
+
+        .btn-file {
+            position: relative;
+            overflow: hidden;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #333;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 5px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #eee;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .btn-file:hover {
+            background: #444;
+            border-color: #888;
+            transform: translateY(-1px);
+        }
+
+        .btn-file input[type=file] {
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+            left: 0;
+            top: 0;
+        }
+
+        .btn-blue {
+            background: #0066cc;
+            border-color: #005bb5;
+            color: white;
+        }
+
+        .status {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 50;
+            color: #00ff99;
+            font-size: 13px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 6px 12px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="controls">
+        <div class="control-group"><label>前 (qian)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_qian" accept="video/*">
+            </div>
+        </div>
+        <div class="control-group"><label>后 (hou)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_hou" accept="video/*">
+            </div>
+        </div>
+        <div class="control-group"><label>左 (zuo)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_zuo" accept="video/*">
+            </div>
+        </div>
+        <div class="control-group"><label>右 (you)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_you" accept="video/*">
+            </div>
+        </div>
+        <div class="control-group"><label>底 (di)</label>
+            <div class="btn-file">🎬 视频<input type="file" class="video-input" data-face="box_di" accept="video/*"></div>
+        </div>
+    </div>
+
+    <div id="status" class="status">正在加载指定模型...</div>
+    <canvas id="renderCanvas"></canvas>
+
+    <script>
+        // === 配置项 ===
+        // 硬编码路径
+        const DEFAULT_MODEL_PATH = "Untitled5.glb";
+
+        const canvas = document.getElementById("renderCanvas");
+        canvas.addEventListener("wheel", (evt) => evt.preventDefault(), { passive: false });
+
+        const engine = new BABYLON.Engine(canvas, true);
+        const scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0.08, 0.08, 0.1, 1);
+
+        const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 10, new BABYLON.Vector3(0, 0, 0), scene);
+        camera.attachControl(canvas, true);
+        camera.wheelPrecision = 30; camera.minZ = 0.1;
+
+        const hemiLight = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), scene);
+        hemiLight.intensity = 0.8;
+        const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-1, -2, -1), scene);
+        dirLight.intensity = 0.5;
+
+        // 材质配置表 (wAng: 旋转, uScale/vScale: 镜像)
+        let materialsMap = {
+            'box_qian': { name: 'box_qian', matObject: null, texture: null, config: { wAng: Math.PI / 2, uScale: -1, vScale: 1 } },
+            'box_hou': { name: 'box_hou', matObject: null, texture: null, config: { wAng: 0, uScale: -1, vScale: 1 } },
+            'box_zuo': { name: 'box_zuo', matObject: null, texture: null, config: { wAng: Math.PI, uScale: -1, vScale: 1 } },
+            'box_you': { name: 'box_you', matObject: null, texture: null, config: { wAng: Math.PI / 2, uScale: -1, vScale: 1 } },
+            'box_di': { name: 'box_di', matObject: null, texture: null, config: { wAng: 0, uScale: -1, vScale: 1 } }
+        };
+
+        // === 加载函数 ===
+        function loadModel(url) {
+            document.getElementById('status').innerText = "正在加载: " + url;
+
+            // 开始加载
+            BABYLON.SceneLoader.ImportMeshAsync("", url, "", scene, null, ".glb").then((result) => {
+                const root = result.meshes[0];
+                root.normalizeToUnitCube();
+
+                document.getElementById('status').innerText = "模型加载成功，请上传视频";
+
+                // 绑定材质对象
+                for (let key in materialsMap) {
+                    const targetName = materialsMap[key].name;
+                    const foundMat = scene.getMaterialByName(targetName);
+                    if (foundMat) {
+                        materialsMap[key].matObject = foundMat;
+                        foundMat.roughness = 1.0;
+                        foundMat.metallic = 0.0;
+                        foundMat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+                    }
+                }
+
+                // 修复底面 UV
+                result.meshes.forEach(m => {
+                    if (m.material && m.material.name === materialsMap['box_di'].name) {
+                        fixFloorUVsSmart(m, scene);
+                    }
+                });
+
+            }).catch((err) => {
+                console.warn(err);
+                document.getElementById('status').innerText = "加载失败 (请检查路径或跨域限制)";
+                alert("加载失败：浏览器可能无法直接访问本地绝对路径。\n请尝试将文件移动到同一目录或使用本地服务器。");
+            });
+        }
+
+        // === 1. 初始化时直接加载硬编码路径 ===
+        loadModel(DEFAULT_MODEL_PATH);
+
+        // === 2. 视频处理逻辑 ===
+        document.querySelectorAll('.video-input').forEach(input => {
+            input.onchange = (evt) => {
+                const file = evt.target.files[0];
+                const face = evt.target.dataset.face;
+                if (!file || !materialsMap[face].matObject) return;
+                applyVideoToFace(face, URL.createObjectURL(file));
+            };
+        });
+
+        function applyVideoToFace(faceKey, videoUrl) {
+            const target = materialsMap[faceKey];
+            if (!target.matObject) return;
+            if (target.texture) target.texture.dispose();
+
+            const videoTexture = new BABYLON.VideoTexture(
+                `vid_${faceKey}`, videoUrl, scene, true, false,
+                BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+                { autoPlay: true, loop: true, muted: true }
+            );
+
+            videoTexture.uRotationCenter = 0.5;
+            videoTexture.vRotationCenter = 0.5;
+            const conf = target.config;
+            videoTexture.wAng = conf.wAng;
+            videoTexture.uScale = conf.uScale;
+            videoTexture.vScale = conf.vScale;
+
+            target.matObject.albedoTexture = videoTexture;
+            target.matObject.emissiveTexture = videoTexture;
+            target.matObject.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            target.texture = videoTexture;
+        }
+
+        // === 3. 智能UV逻辑 ===
+        function fixFloorUVsSmart(floorMesh, scene) {
+            let meshQian = null, meshHou = null;
+            scene.meshes.forEach(m => {
+                if (m.material && m.material.name === 'box_qian') meshQian = m;
+                if (m.material && m.material.name === 'box_hou') meshHou = m;
+            });
+            if (!meshQian || !meshHou) { console.warn("无法定位前后，使用默认UV"); return; }
+
+            const centerQian = meshQian.getBoundingInfo().boundingBox.centerWorld;
+            const centerHou = meshHou.getBoundingInfo().boundingBox.centerWorld;
+            const positions = floorMesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+            if (!positions) return;
+
+            let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+            for (let i = 0; i < positions.length; i += 3) {
+                const x = positions[i], z = positions[i + 2];
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            }
+            const rangeX = maxX - minX || 1;
+            const rangeZ = maxZ - minZ || 1;
+            const diffX = centerQian.x - centerHou.x;
+            const diffZ = centerQian.z - centerHou.z;
+            const isAlignedZ = Math.abs(diffZ) > Math.abs(diffX);
+
+            const uvs = [];
+            for (let i = 0; i < positions.length; i += 3) {
+                const x = positions[i], z = positions[i + 2];
+                let u, v;
+                if (isAlignedZ) {
+                    u = (x - minX) / rangeX;
+                    if (diffZ > 0) v = (z - minZ) / rangeZ;
+                    else v = 1.0 - ((z - minZ) / rangeZ);
+                } else {
+                    u = (z - minZ) / rangeZ;
+                    if (diffX > 0) v = (x - minX) / rangeX;
+                    else v = 1.0 - ((x - minX) / rangeX);
+                }
+                uvs.push(u, v);
+            }
+            floorMesh.setVerticesData(BABYLON.VertexBuffer.UVKind, uvs);
+        }
+
+        engine.runRenderLoop(() => scene.render());
+        window.addEventListener("resize", () => engine.resize());
+    </script>
+</body>
+
+</html>

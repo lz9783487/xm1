@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 模型四面独立视频播放 (带旋转控制)</title>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+
+    <style>
+        html, body { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            overflow: hidden; background: #111; font-family: 'Segoe UI', sans-serif; 
+        }
+
+        #renderCanvas { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            touch-action: none; outline: none; z-index: 1; 
+        }
+
+        /* 控制面板 */
+        .controls {
+            position: absolute; top: 0; left: 0; width: 100%; z-index: 100;
+            background: rgba(20, 20, 20, 0.9); backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding: 10px 20px; box-sizing: border-box;
+            display: flex; gap: 15px; align-items: center; justify-content: center; flex-wrap: wrap; 
+        }
+
+        .control-group { 
+            display: flex; flex-direction: column; gap: 4px; align-items: center; 
+            min-width: 90px;
+        }
+        .control-group label { font-size: 11px; color: #bbb; font-weight: 600; text-transform: uppercase; }
+        
+        /* 这一行包含 上传按钮 和 旋转下拉框 */
+        .input-row { display: flex; gap: 5px; }
+
+        /* 按钮样式 */
+        .btn-file {
+            position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center;
+            background: #333; border: 1px solid #555; border-radius: 4px;
+            padding: 4px 10px; cursor: pointer; font-size: 12px; color: #eee; transition: all 0.2s;
+            height: 24px;
+        }
+        .btn-file:hover { background: #444; border-color: #888; }
+        .btn-file input[type=file] { position: absolute; opacity: 0; cursor: pointer; width: 100%; height: 100%; left:0; top:0;}
+        .btn-blue { background: #0066cc; border-color: #005bb5; color: white; }
+        
+        /* 下拉框样式 */
+        .rot-select {
+            background: #222; color: #eee; border: 1px solid #555; border-radius: 4px;
+            padding: 0 5px; height: 26px; font-size: 12px; cursor: pointer; outline: none;
+        }
+        .rot-select:hover { border-color: #888; }
+
+        .divider { width: 1px; height: 35px; background: rgba(255,255,255,0.15); margin: 0 5px; }
+
+        .status { 
+            position: absolute; bottom: 20px; left: 20px; z-index: 50;
+            color: #00ff99; font-size: 13px; background: rgba(0,0,0,0.7);
+            padding: 6px 12px; border-radius: 4px; pointer-events: none; user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>1. 模型</label>
+            <div class="btn-file btn-blue">
+                📦 GLB
+                <input type="file" id="fileGLB" accept=".glb,.gltf">
+            </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="control-group">
+            <label>2. 背面 (Back)</label>
+            <div class="input-row">
+                <div class="btn-file">
+                    🎬 视频
+                    <input type="file" class="video-input" data-face="back" accept="video/*">
+                </div>
+                <select class="rot-select" data-face="back">
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>3. 左侧 (Left)</label>
+            <div class="input-row">
+                <div class="btn-file">
+                    🎬 视频
+                    <input type="file" class="video-input" data-face="left" accept="video/*">
+                </div>
+                <select class="rot-select" data-face="left">
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>4. 右侧 (Right)</label>
+            <div class="input-row">
+                <div class="btn-file">
+                    🎬 视频
+                    <input type="file" class="video-input" data-face="right" accept="video/*">
+                </div>
+                <select class="rot-select" data-face="right">
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>5. 地面 (Floor)</label>
+            <div class="input-row">
+                <div class="btn-file">
+                    🎬 视频
+                    <input type="file" class="video-input" data-face="floor" accept="video/*">
+                </div>
+                <select class="rot-select" data-face="floor">
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div id="status" class="status">等待导入 GLB 模型...</div>
+    <canvas id="renderCanvas"></canvas>
+
+    <script>
+        // === 1. 初始化 Babylon 引擎 ===
+        const canvas = document.getElementById("renderCanvas");
+        const engine = new BABYLON.Engine(canvas, true);
+        const scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0.08, 0.08, 0.1, 1);
+
+        const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 8, new BABYLON.Vector3(0, 0, 0), scene);
+        camera.attachControl(canvas, true);
+        camera.wheelPrecision = 50; camera.minZ = 0.1;
+
+        const hemiLight = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), scene);
+        hemiLight.intensity = 0.8;
+        const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-1, -2, -1), scene);
+        dirLight.intensity = 0.5;
+
+        // 材质映射表：增加 currentRotation 字段来存储当前的弧度
+        let materialsMap = {
+            'back':  { name: 'Material.003', matObject: null, texture: null, currentRotation: 0 },
+            'left':  { name: 'Material.002', matObject: null, texture: null, currentRotation: 0 },
+            'right': { name: 'Material.004', matObject: null, texture: null, currentRotation: 0 },
+            'floor': { name: 'Material.005', matObject: null, texture: null, currentRotation: 0 }
+        };
+
+        // === 2. 加载模型 ===
+        document.getElementById('fileGLB').onchange = (evt) => {
+            const file = evt.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            document.getElementById('status').innerText = "加载模型中...";
+
+            BABYLON.SceneLoader.ImportMeshAsync("", url, "", scene, null, ".glb").then((result) => {
+                const root = result.meshes[0];
+                root.normalizeToUnitCube();
+                document.getElementById('status').innerText = "模型就绪，请上传视频并调节旋转";
+
+                for (let key in materialsMap) {
+                    const targetName = materialsMap[key].name;
+                    const foundMat = scene.getMaterialByName(targetName);
+                    if (foundMat) {
+                        materialsMap[key].matObject = foundMat;
+                        foundMat.roughness = 1.0; foundMat.metallic = 0.0;
+                        foundMat.albedoColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+                    }
+                }
+
+                result.meshes.forEach(m => {
+                    if (m.material && m.material.name === materialsMap.floor.name) fixFloorUVs(m);
+                });
+
+            }).catch(console.error);
+        };
+
+        // === 3. 处理旋转逻辑 (下拉框) ===
+        document.querySelectorAll('.rot-select').forEach(select => {
+            select.onchange = (evt) => {
+                const face = evt.target.dataset.face;
+                const degrees = parseInt(evt.target.value);
+                // 转换为弧度: 角度 * (PI / 180)
+                const radians = degrees * (Math.PI / 180);
+
+                // 1. 更新数据记录
+                materialsMap[face].currentRotation = radians;
+
+                // 2. 如果当前有视频纹理，立即应用
+                if (materialsMap[face].texture) {
+                    materialsMap[face].texture.wAng = radians;
+                }
+            };
+        });
+
+        // === 4. 处理视频上传 ===
+        document.querySelectorAll('.video-input').forEach(input => {
+            input.onchange = (evt) => {
+                const file = evt.target.files[0];
+                const face = evt.target.dataset.face;
+                if (!file || !materialsMap[face].matObject) return;
+                
+                applyVideoToFace(face, URL.createObjectURL(file));
+            };
+        });
+
+        function applyVideoToFace(faceKey, videoUrl) {
+            const target = materialsMap[faceKey];
+            if (!target.matObject) return;
+            if (target.texture) target.texture.dispose();
+
+            const videoTexture = new BABYLON.VideoTexture(
+                `vid_${faceKey}`, videoUrl, scene, true, false, 
+                BABYLON.Texture.TRILINEAR_SAMPLINGMODE, 
+                { autoPlay: true, loop: true, muted: true }
+            );
+
+            // === 关键修改：应用旋转 ===
+            
+            // 1. 设置旋转中心为图片中心，否则旋转时图片会跑偏
+            videoTexture.uRotationCenter = 0.5;
+            videoTexture.vRotationCenter = 0.5;
+
+            // 2. 读取当前下拉框设定的旋转值并应用
+            videoTexture.wAng = target.currentRotation;
+
+            // 3. 处理翻转 (GLB 标准处理)
+            // 地面通常不需要翻转 (vScale=1)，墙面通常需要垂直翻转 (vScale=-1)
+            if (faceKey === 'floor') {
+                videoTexture.vScale = 1; 
+            } else {
+                videoTexture.vScale = -1;
+            }
+            
+            // 4. 应用材质
+            target.matObject.albedoTexture = videoTexture;
+            target.matObject.emissiveTexture = videoTexture;
+            target.matObject.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            target.texture = videoTexture;
+        }
+
+        // === 5. 地面 UV 修复 (保持不变) ===
+        function fixFloorUVs(mesh) {
+            const positions = mesh.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+            if (!positions) return;
+
+            let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+            for (let i = 0; i < positions.length; i += 3) {
+                const x = positions[i], z = positions[i + 2];
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            }
+            const rangeX = maxX - minX || 1, rangeZ = maxZ - minZ || 1;
+            const uvs = [];
+            for (let i = 0; i < positions.length; i += 3) {
+                uvs.push((positions[i] - minX) / rangeX, (positions[i + 2] - minZ) / rangeZ);
+            }
+            mesh.setVerticesData(BABYLON.VertexBuffer.UVKind, uvs);
+        }
+
+        engine.runRenderLoop(() => scene.render());
+        window.addEventListener("resize", () => engine.resize());
+    </script>
+</body>
+</html>
