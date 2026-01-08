@@ -278,7 +278,9 @@
 
             resize() {
                 if (!this.videoElement) return;
-                const aspect = this.videoElement.videoWidth / this.videoElement.videoHeight;
+                const vw = this.videoElement.videoWidth || this.videoElement.width;
+                const vh = this.videoElement.videoHeight || this.videoElement.height;
+                const aspect = vw / vh;
                 if (!aspect) return;
 
                 const containerW = editorModal.clientWidth * 0.8;
@@ -450,7 +452,8 @@
 
         window.openEditor = () => {
             if (!segmenter.isPlaying) return;
-            selector.open(segmenter.videoElement, segmenter.getRegions());
+            // 使用 getSource() 获取处理后的画面 (Canvas)
+            selector.open(segmenter.getSource(), segmenter.getRegions());
         };
 
         window.toggleDewarp = (enabled) => {

@@ -1,4 +1,5 @@
 import { DewarpProcessor } from './dewarp_processor.js';
+import { DistortionCorrector } from './distortion_corrector.js';
 
 export class VideoSegmenter {
     constructor() {
@@ -37,6 +38,11 @@ export class VideoSegmenter {
         this.useDewarp = true;
         this.perspectivePoints = {};
 
+        // 加入 DistortionCorrector (img_process logic)
+        this.distortionCorrector = new DistortionCorrector();
+        // 可以在这里设置默认参数，如果需要的话
+        // this.distortionCorrector.setParams({ scale: 1.0 });
+
         this.tempCanvas = document.createElement('canvas');
         this.tempCtx = this.tempCanvas.getContext('2d', { willReadFrequently: true });
     }
@@ -54,6 +60,21 @@ export class VideoSegmenter {
         this.isPlaying = true;
     }
 
+    /**
+     * 获取当前的视频源（经过处理的 Canvas 或者 原始 Video）
+     * 提供给外部 (如 region_selector) 使用
+     */
+    getSource() {
+        return this.distortionCorrector.getCanvas();
+    }
+
+    /**
+     * 设置畸变修正参数
+     */
+    setDistortionParams(params) {
+        this.distortionCorrector.setParams(params);
+    }
+
     processFrame() {
         if (!this.isPlaying || this.videoElement.paused || this.videoElement.ended) return;
 
@@ -61,9 +82,18 @@ export class VideoSegmenter {
         const vh = this.videoElement.videoHeight;
         if (!vw || !vh) return;
 
-        this.tempCanvas.width = vw;
-        this.tempCanvas.height = vh;
-        this.tempCtx.drawImage(this.videoElement, 0, 0, vw, vh);
+        // 1. 先通过 DistortionCorrector 处理一帧
+        this.distortionCorrector.process(this.videoElement);
+        const source = this.distortionCorrector.getCanvas();
+
+        // 2. 将处理后的 source 绘制到 tempCanvas
+        // 注意：source 是 canvas，宽高应该已经和 video 一致
+        if (this.tempCanvas.width !== source.width || this.tempCanvas.height !== source.height) {
+            this.tempCanvas.width = source.width;
+            this.tempCanvas.height = source.height;
+        }
+
+        this.tempCtx.drawImage(source, 0, 0, source.width, source.height);
 
         this.activeFaces.forEach(face => {
             const ctx = this.contexts[face];
@@ -74,8 +104,6 @@ export class VideoSegmenter {
                 const pts = this.perspectivePoints[face];
 
                 // === 修复点：直接按顺序传递 ===
-                // RegionSelector 传过来的 pts 已经是 [左上, 右上, 右下, 左下] 的顺时针顺序了
-                // 不需要再手动交换索引
                 const srcPoints = pts.map(p => ({
                     x: p.x * vw,
                     y: p.y * vh
@@ -87,7 +115,7 @@ export class VideoSegmenter {
                 const r = this.regions[face];
                 if (r && r.w > 0 && r.h > 0) {
                     ctx.drawImage(
-                        this.videoElement,
+                        this.tempCanvas, // 使用 tempCanvas，其中包含了 dewarp 后的图像
                         r.x * vw, r.y * vh, r.w * vw, r.h * vh,
                         0, 0, cvs.width, cvs.height
                     );

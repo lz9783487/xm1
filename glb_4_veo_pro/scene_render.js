@@ -57,7 +57,7 @@ export class SceneRender {
             'box_qian': { name: 'box_qian', matObject: null, config: { wAng: -Math.PI / 2, uScale: -1, vScale: 1 } },
             'box_hou': { name: 'box_hou', matObject: null, config: { wAng: 0, uScale: -1, vScale: -1 } },
             'box_zuo': { name: 'box_zuo', matObject: null, config: { wAng: -Math.PI, uScale: 1, vScale: -1 } },
-            'box_you': { name: 'box_you', matObject: null, config: { wAng: -Math.PI / 2, uScale: -1, vScale: -1 } },
+            'box_you': { name: 'box_you', matObject: null, config: { wAng: Math.PI / 2, uScale: 1, vScale: -1 } },
             'box_di': { name: 'box_di', matObject: null, config: { wAng: Math.PI, uScale: -1, vScale: 1 } }
         };
     }
