@@ -48,12 +48,22 @@ export class VideoSegmenter {
     }
 
     async loadVideo(url) {
+        if (this.videoElement.srcObject) {
+            const tracks = this.videoElement.srcObject.getTracks();
+            tracks.forEach(track => track.stop());
+            this.videoElement.srcObject = null;
+        }
         this.videoElement.src = url;
         await this.videoElement.play();
         this.isPlaying = true;
     }
 
     async loadWebcam() {
+        if (this.videoElement.srcObject) {
+            const tracks = this.videoElement.srcObject.getTracks();
+            tracks.forEach(track => track.stop());
+        }
+        this.videoElement.src = "";
         const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
         this.videoElement.srcObject = stream;
         await this.videoElement.play();
